@@ -233,6 +233,40 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ ok: true, soloist: soloistStatus.running }));
         return;
     }
+    // Next-Gen: YouTube resolver (optional)
+    // If YT_API_KEY or YT_COOKIE is set, a real implementation could use
+    // yt-dlp / youtubei to return a direct audio URL. For now we expose the
+    // hook so the frontend can degrade gracefully to tab capture / demo.
+    if (req.url.startsWith('/api/youtube')) {
+        try {
+            const urlObj = new URL(req.url, 'http://localhost');
+            const id = urlObj.searchParams.get('id') || '';
+            res.writeHead(501, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+            res.end(JSON.stringify({
+                error: 'YouTube direct audio not configured on this host',
+                hint: 'Set YT_API_KEY or deploy yt-dlp proxy, or use Demo Rave / File / System capture (tab audio).',
+                id: id,
+                demoFallback: '/demo/rave-140bpm.mp3',
+                details: 'YouTube embeds are DRM-adjacent; prefer tab capture (System → Share tab audio) or host a CORS MP3 fallback as done for Demo.'
+            }, null, 2));
+        } catch (e) {
+            res.writeHead(400).end('Bad youtube request');
+        }
+        return;
+    }
+    // Demo audio info — lets UI verify CORS before playing
+    if (req.url === '/api/demo') {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+        res.end(JSON.stringify({
+            tracks: [
+                { id: 'rave-140', title: 'Rave Energy 140 BPM', artist: 'Pixabay · Energy', url: 'https://cdn.pixabay.com/download/audio/2021/08/09/audio_0625c1539c.mp3?filename=energy-115010.mp3', bpm: 140 },
+                { id: 'rave-128', title: 'Neon Pulse 128 BPM', artist: 'Pixabay · Epic', url: 'https://cdn.pixabay.com/download/audio/2022/03/24/audio_d1718ab41b.mp3?filename=electronic-rock-112719.mp3', bpm: 128 },
+                { id: 'rave-150', title: 'Hyper Drive 150 BPM', artist: 'Pixabay · Hyper', url: 'https://cdn.pixabay.com/download/audio/2022/10/30/audio_8ef11c7db6.mp3?filename=cyberpunk-138757.mp3', bpm: 150 }
+            ],
+            note: 'CORS-enabled demo tracks for zero-friction instant testing. Analyzer wires via createMediaElementSource with crossOrigin anonymous.'
+        }, null, 2));
+        return;
+    }
 
     let pathname;
     try {

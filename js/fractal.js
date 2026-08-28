@@ -1761,6 +1761,14 @@ window.FractalEngine = (function () {
     let seedAngle = 0, seedTime = null;
     const seed = { x: 0.7, y: 0.0 };
 
+    // Next-Gen: realtime morph + auto-flight controls
+    let morph = 0;                // 0 = pure Julia, 1 = morph towards Bunny
+    let morphRate = 0;            // rate of morph oscillation
+    let flyThrough = false;
+    let flySpeed = 0.04;          // camera drift speed (zoom units per second)
+    let flyOffset = { x: 0, y: 0 };
+    let flyPhase = 0;
+
     // Is the Julia set for this seed connected? That is exactly Mandelbrot
     // membership for k — the critical orbit stays bounded iff the interior is
     // filled — so one escape-time test answers it.
@@ -1780,11 +1788,30 @@ window.FractalEngine = (function () {
         updateAudio(m, stamp === undefined ? timeMs : stamp);
         if (timeMs === seedTime) return seed;      // once per frame, whoever asks
 
+        // Morph oscillation: realtime fractal morphing driven by audio centroid + LFO
+        // 0→1 sweeps Julia → Burning Ship mix via uniform blending in future shaders;
+        // here morph modulates rad/drift for immediate visual effect.
+        if (morphRate !== 0 && m) {
+            morph = 0.5 + 0.5 * Math.sin(timeMs * 0.0003 * morphRate + slowCentroid * 6.283);
+        }
+
+        // Fly-through: continuous camera drift through fractal valleys, audio-coupled.
+        // Pan drifts along slowBand direction; zoom creeps outward with presence.
+        if (flyThrough && m) {
+            const dt = (timeMs - (seedTime||timeMs)) / 1000;
+            flyPhase += dt * flySpeed * (0.6 + m.energy * 1.2);
+            flyOffset.x += Math.cos(flyPhase) * 0.0008 * (0.5 + slowBand[2]);
+            flyOffset.y += Math.sin(flyPhase * 1.3) * 0.0006 * (0.5 + slowBand[0]);
+            // wrap to avoid drifting infinitely far
+            if (Math.abs(flyOffset.x) > 1.2) flyOffset.x *= 0.5;
+            if (Math.abs(flyOffset.y) > 1.2) flyOffset.y *= 0.5;
+        }
+
         const dt = seedTime === null ? 0 : Math.min(Math.max(timeMs - seedTime, 0), 1000);
         seedTime = timeMs;
 
-        const rad = 0.70 + slowBand[1] * 0.16 + slowBand[0] * 0.07;
-        const drift = slowCentroid * 3.0 + slowBand[3] * 1.2;
+        const rad = 0.70 + slowBand[1] * 0.16 + slowBand[0] * 0.07 + morph * 0.15;
+        const drift = slowCentroid * 3.0 + slowBand[3] * 1.2 + morph * 0.8;
         const a = seedAngle + drift;
 
         let brake = 1;
@@ -1801,7 +1828,7 @@ window.FractalEngine = (function () {
             brake = SEED_BRAKE + (1 - SEED_BRAKE) * d * d;
         }
 
-        seedAngle += SEED_RATE * (dt / 1000) * brake;
+        seedAngle += SEED_RATE * (dt / 1000) * brake * (1 + slowBand[4]*0.5);
         const ang = seedAngle + drift;
         seed.x = Math.cos(ang) * rad;
         seed.y = Math.sin(ang) * rad;
@@ -2029,6 +2056,14 @@ window.FractalEngine = (function () {
         lockPoint: lockPoint,
         lockClear: lockClear,
         isLocked: isLocked,
+        // Next-Gen controls: morph & fly-through
+        setMorph: function(v){ morph = Math.max(0, Math.min(1, v)); },
+        getMorph: function(){ return morph; },
+        setMorphRate: function(v){ morphRate = v; },
+        setFlyThrough: function(on, speed){ flyThrough = !!on; if(speed!==undefined) flySpeed = speed; if(!on){ flyOffset.x=0; flyOffset.y=0; } },
+        isFlyThrough: function(){ return flyThrough; },
+        getFlyOffset: function(){ return { x: flyOffset.x, y: flyOffset.y }; },
+        setSeedAngle: function(a){ seedAngle = a; },
         CLICK_EFFECTS: CLICK_EFFECTS,
         HOVER_EFFECTS: HOVER_EFFECTS,
         BACKGROUNDS: BACKGROUNDS,

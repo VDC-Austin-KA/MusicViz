@@ -53,6 +53,8 @@ canvas.stage {
 /* 2D canvas sits above the fluid canvas; only one is visible at a time. */
 #viz2d { z-index: 2; }
 #fluid-canvas { z-index: 1; }
+#geometry-canvas { z-index: 3; }
+#fractal-canvas { z-index: 1; }
 canvas.stage.inactive { display: none; }
 
 /* ------------------------------- Panel ---------------------------------- */

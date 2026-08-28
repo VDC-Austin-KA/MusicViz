@@ -23,7 +23,11 @@ window.FluidEngine = (function () {
         VISCOSITY: 0.3,
         SPLAT_RADIUS: 0.25,
         BLOOM: 1.0,
-        SPLAT_BUDGET: 26      // per frame; layers degrade gracefully past it
+        SPLAT_BUDGET: 26,      // per frame; layers degrade gracefully past it
+        // Next-Gen: per-band audio coupling multipliers
+        AUDIO_CURL_GAIN: 28,
+        AUDIO_DISS_GAIN: 0.035,
+        AUDIO_RADIUS_GAIN: 0.10
     };
 
     let splatsThisFrame = 0;
@@ -474,6 +478,15 @@ window.FluidEngine = (function () {
         renderQuad(null);
     }
 
+    // Next-Gen: apply audio-reactive viscosity/dissipation/bloom helper
+    function applyAudioParams(metrics, k) {
+        if (!metrics) return { vort: config.CURL, diss: config.DENSITY_DISSIPATION };
+        const vort = config.CURL + metrics.band.presence.env * config.AUDIO_CURL_GAIN * (k || 1);
+        const diss = Math.max(0.88, config.DENSITY_DISSIPATION - metrics.band.mid.env * config.AUDIO_DISS_GAIN * (k || 1));
+        const radius = config.SPLAT_RADIUS * (1 + metrics.band.bass.onset * config.AUDIO_RADIUS_GAIN);
+        return { vort, diss, radius };
+    }
+
     return {
         config: config,
         init: init,
@@ -483,6 +496,7 @@ window.FluidEngine = (function () {
         splatsUsed: splatsUsed,
         clear: clearDye,
         solve: solve,
+        applyAudioParams: applyAudioParams,
         isReady: function () { return ready; },
         aspect: function () { return canvas ? canvas.width / canvas.height : 1; }
     };
@@ -638,25 +652,33 @@ window.FluidLayers = (function () {
     }
 
     /* --- interaction: the pointer as a force, available in every mode --- */
+    // Enhanced: multi-touch / multi-pointer. app.js now feeds pointer.pointers[]
+    // for true multi-finger fluid manipulation, plus audio-coupled strength.
     function pointer(c) {
         const p = c.pointer;
-        if (!p.active || c.interact <= 0) return;
-        const strength = c.interact;
-
-        // Dragging paints directly; holding pushes or pulls a ring of force,
-        // so there is something to play with in automated modes too.
-        if (p.moving) {
-            F.splat(p.x, p.y, p.vx * 5 * strength, p.vy * 5 * strength,
-                    col(0, 1), 1.0);
-        }
-        if (p.down) {
-            const n = 5;
-            const push = (p.repel ? -1 : 1) * 26 * strength;
-            for (let i = 0; i < n; i++) {
-                const a = TAU * (i / n) + c.t * 0.004;
-                F.splat(p.x + Math.cos(a) * 0.04, p.y + Math.sin(a) * 0.04,
-                        Math.cos(a) * push, Math.sin(a) * push,
-                        col(0.5, 1), 0.7);
+        const strength = c.interact || 0;
+        if (strength <= 0) return;
+        const list = (p.pointers && p.pointers.length) ? p.pointers : (p.active ? [p] : []);
+        if (!list.length) return;
+        for (let idx = 0; idx < list.length; idx++) {
+            const pt = list[idx];
+            if (!pt.active && !pt.down && !pt.moving) continue;
+            // Audio coupling: treble adds fine swirl, bass adds push
+            const audioBoost = 1 + (c.m ? c.m.band.presence.env * 0.6 + c.m.band.bass.env * 0.4 : 0);
+            const s = strength * audioBoost;
+            if (pt.moving) {
+                const vx = (pt.vx || p.vx) * 5 * s, vy = (pt.vy || p.vy) * 5 * s;
+                F.splat(pt.x, pt.y, vx, vy, col(idx * 0.13, 1), 1.0);
+            }
+            if (pt.down) {
+                const n = 5;
+                const push = (pt.repel || p.repel ? -1 : 1) * 26 * s;
+                for (let i = 0; i < n; i++) {
+                    const a = TAU * (i / n) + c.t * 0.004;
+                    F.splat(pt.x + Math.cos(a) * 0.04, pt.y + Math.sin(a) * 0.04,
+                            Math.cos(a) * push, Math.sin(a) * push,
+                            col(0.5 + idx*0.07, 1), 0.7);
+                }
             }
         }
     }

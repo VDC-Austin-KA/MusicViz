@@ -18,6 +18,7 @@
     <canvas id="fluid-canvas" class="stage"></canvas>
     <canvas id="fractal-canvas" class="stage inactive"></canvas>
     <canvas id="viz2d" class="stage inactive"></canvas>
+    <canvas id="geometry-canvas" class="stage inactive"></canvas>
 
     <!-- Slide-out control panel ------------------------------------------- -->
     <button id="panel-toggle" title="Show / hide controls (H)" aria-label="Toggle control panel">&#8249;</button>
@@ -38,6 +39,26 @@
                     <button id="btn-file" title="Play a local audio file">File</button>
                 </div>
                 <input type="file" id="file-input" accept="audio/*" hidden>
+                <!-- Next-Gen: Zero-friction instant rave demos + YouTube -->
+                <div class="control-group" style="margin-top:8px;">
+                    <label>Instant Demo — high-energy rave (no login) <span id="demo-label" class="hint-inline">140 BPM</span></label>
+                    <div class="btn-grid three">
+                        <button id="btn-demo" class="primary" title="Play built-in rave demo (CORS analyser)" style="background: linear-gradient(90deg,#ff005c,#ff8c00); border-color:#ff6d00; color:#fff;">▶ Demo Rave</button>
+                        <button id="btn-demo-next" title="Next demo track">Next</button>
+                        <button id="btn-demo-stop" title="Stop demo">■ Stop</button>
+                    </div>
+                    <div class="note" style="font-size:0.78em; margin-top:4px;">
+                        <strong>Zero friction:</strong> pre-loaded with electronic/rave (140 BPM default). Drives analyser directly — no picker, no Spotify. Try this first.
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>Or paste YouTube / audio URL <span class="hint-inline">BETA</span></label>
+                    <div class="copy-field">
+                        <input type="text" id="yt-url" placeholder="https://youtube.com/watch?v=…  or  https://…/track.mp3" spellcheck="false" autocomplete="off">
+                        <button id="btn-yt-load">Play</button>
+                    </div>
+                    <p class="note" style="font-size:0.78em;">YouTube links resolved via server if <code>YT_API_KEY</code> is set; direct MP3s play anywhere. YouTube embed playback uses tab capture — click <em>System → share tab audio</em> if it shows silent.</p>
+                </div>
                 <div class="btn-grid" style="margin-top:6px;">
                     <button id="btn-src-embed" class="spotify"
                             title="Play in this tab and capture it — no daemon needed">Spotify Player</button>
@@ -393,6 +414,23 @@
                     <input type="range" id="slider-zoom" min="-100" max="600" step="1" value="0">
                 </div>
                 <button class="btn" id="btn-reset-view">Reset view</button>
+                <!-- Next-Gen: morph + fly-through -->
+                <div class="control-group">
+                    <label>Fractal morph <span id="val-morph">0%</span></label>
+                    <input type="range" id="slider-morph" min="0" max="100" step="1" value="0">
+                </div>
+                <div class="control-group">
+                    <label>Morph auto-rate <span id="val-morph-rate">0%</span></label>
+                    <input type="range" id="slider-morph-rate" min="0" max="100" step="5" value="0">
+                </div>
+                <div class="toggle-row">
+                    <span>Fly-through mode</span>
+                    <button class="switch" id="sw-fly" role="switch" aria-checked="false" aria-label="Fly-through"></button>
+                </div>
+                <div class="control-group">
+                    <label>Flight speed <span id="val-fly">1.0×</span></label>
+                    <input type="range" id="slider-fly" min="0.2" max="3.0" step="0.1" value="1.0">
+                </div>
                 <div class="control-group">
                     <label>Background</label>
                     <select id="select-bg"></select>
@@ -500,8 +538,10 @@
     <script src="js/fluid.js"></script>
     <script src="js/fractal.js"></script>
     <script src="js/viz2d.js"></script>
+    <script src="js/geometry.js"></script>
     <script src="js/spotify.js"></script>
     <script src="js/xr.js"></script>
+    <script src="js/xr-next.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

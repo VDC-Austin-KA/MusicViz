@@ -29,6 +29,17 @@ window.AudioEngine = (function () {
     let sourceLabel = 'none';
     let lastSoundAt = 0;
 
+    /* ------------------- Next-Gen: Default Rave / YouTube ------------------ */
+    // Built-in high-energy electronic/rave demos for zero-friction instant testing.
+    // CORS-enabled; HTMLAudioElement with crossOrigin='anonymous' so
+    // createMediaElementSource can feed the analyser without taint.
+    const DEMO_TRACKS = [
+        { id: 'rave-140', title: 'Rave Energy 140 BPM', artist: 'Pixabay · Energy', url: 'https://cdn.pixabay.com/download/audio/2021/08/09/audio_0625c1539c.mp3?filename=energy-115010.mp3', bpm: 140 },
+        { id: 'rave-128', title: 'Neon Pulse 128 BPM', artist: 'Pixabay · Epic', url: 'https://cdn.pixabay.com/download/audio/2022/03/24/audio_d1718ab41b.mp3?filename=electronic-rock-112719.mp3', bpm: 128 },
+        { id: 'rave-150', title: 'Hyper Drive 150 BPM', artist: 'Pixabay · Hyper', url: 'https://cdn.pixabay.com/download/audio/2022/10/30/audio_8ef11c7db6.mp3?filename=cyberpunk-138757.mp3', bpm: 150 }
+    ];
+    let demoIdx = 0;
+
     const beatTimes = [];
     let lastBeatAt = 0;
 
@@ -316,6 +327,82 @@ window.AudioEngine = (function () {
         lastSoundAt = performance.now();
         onStatus('connected', sourceLabel);
         return el;
+    }
+
+    // Generic element helper for demo / YouTube / Spotify preview streams.
+    // All CORS demo tracks set crossOrigin='anonymous' so analyser can capture.
+    function useMediaElement(src, label, opts) {
+        ensureContext();
+        disconnect();
+        resume();
+        const el = new Audio();
+        el.crossOrigin = 'anonymous';
+        el.loop = !!(opts && opts.loop);
+        el.autoplay = !!(opts && opts.autoplay);
+        if (opts && opts.volume !== undefined) el.volume = opts.volume;
+        el.src = src;
+        mediaEl = el;
+        // createMediaElementSource must happen after src is set for CORS
+        sourceNode = ctx.createMediaElementSource(el);
+        sourceNode.connect(gainTrim);
+        sourceNode.connect(ctx.destination);
+        sourceLabel = label || src;
+        captureKind = (opts && opts.kind) || 'file';
+        resetAdaptive();
+        const p = el.play();
+        if (p && p.catch) p.catch(e => {
+            // Autoplay often blocked until user gesture; keep status honest
+            onStatus('error', 'Tap Play to start audio (' + (e.message || 'autoplay blocked') + ')');
+            // expose element so UI can retry
+        });
+        lastSoundAt = performance.now();
+        onStatus('connected', sourceLabel);
+        el.addEventListener('error', () => onStatus('error', 'Audio load failed — CORS or network. Try another track.'));
+        return el;
+    }
+
+    function useDemo(idx) {
+        if (typeof idx === 'number') demoIdx = ((idx % DEMO_TRACKS.length) + DEMO_TRACKS.length) % DEMO_TRACKS.length;
+        const track = DEMO_TRACKS[demoIdx];
+        const el = useMediaElement(track.url, 'demo: ' + track.title + ' — ' + track.artist, { loop: true, kind: 'demo' });
+        setBpmHint(track.bpm);
+        setSynthetic(false);
+        // bump gain slightly for pixabay masters which are quieter than system capture
+        if (gainTrim) gainTrim.gain.value = 1.1;
+        return el;
+    }
+
+    function nextDemo() {
+        demoIdx = (demoIdx + 1) % DEMO_TRACKS.length;
+        return useDemo(demoIdx);
+    }
+
+    // YouTube: client extracts videoId then asks server to resolve a direct audio URL.
+    // If server has no resolver (no YT_API_KEY), falls back to instruct user to use Demo/File.
+    async function useYouTube(youtubeUrl) {
+        const idMatch = (youtubeUrl || '').match(/(?:v=|\.be\/|embed\/)([A-Za-z0-9_-]{11})/);
+        if (!idMatch) {
+            onStatus('error', 'That does not look like a YouTube link. Paste a full youtube.com/watch?v= URL.');
+            return null;
+        }
+        const videoId = idMatch[1];
+        // Try server proxy first
+        try {
+            const r = await fetch('/api/youtube?id=' + encodeURIComponent(videoId));
+            if (r.ok) {
+                const j = await r.json();
+                if (j && j.audioUrl) {
+                    return useMediaElement(j.audioUrl, 'youtube: ' + (j.title || videoId), { loop: false, kind: 'youtube' });
+                }
+            }
+        } catch (e) { /* fall through to iframe hint */ }
+        // No direct stream available — instruct to use embed + tab capture, which is the reliable path
+        onStatus('error', 'Direct YouTube audio not available on this host. Use the Spotify Player tab capture, or Demo tracks — YouTube embed playback needs tab audio capture.');
+        // As convenience, also open youtube in embed helper if available
+        if (window.SpotifyClient && window.SpotifyClient.setYoutubeEmbed) {
+            window.SpotifyClient.setYoutubeEmbed(videoId);
+        }
+        return null;
     }
 
     function setSynthetic(on, bpm) {
@@ -669,10 +756,16 @@ window.AudioEngine = (function () {
         BAND_COUNT: BAND_COUNT,
         WAVE_COUNT: WAVE_COUNT,
         BAND_KEYS: BAND_DEFS.map(d => d.key),
+        BAND_DEFS: BAND_DEFS,
+        DEMO_TRACKS: DEMO_TRACKS,
         update: update,
         useMicrophone: useMicrophone,
         useSystemAudio: useSystemAudio,
         useFile: useFile,
+        useMediaElement: useMediaElement,
+        useDemo: useDemo,
+        nextDemo: nextDemo,
+        useYouTube: useYouTube,
         setSynthetic: setSynthetic,
         setBpmHint: setBpmHint,
         disconnect: disconnect,
@@ -686,6 +779,26 @@ window.AudioEngine = (function () {
         setAutoLevel: function (on) {
             config.autoLevel = !!on;
             if (!on && gainTrim) { autoGain = 1; gainTrim.gain.value = 1; }
+        },
+        // Uniforms helper: multi-band analyzer driving shader uniforms in real time
+        // Bass=low thump, Mids=melody, Treble=air — precisely the split Sonia Boller & Teoxoy need
+        getUniforms: function () {
+            return {
+                bass: bands.bass ? bands.bass.norm : 0,
+                mid: bands.mid ? bands.mid.norm : 0,
+                treble: bands.air ? bands.air.norm : 0,
+                lowMid: bands.lowMid ? bands.lowMid.norm : 0,
+                highMid: bands.highMid ? bands.highMid.norm : 0,
+                presence: bands.presence ? bands.presence.norm : 0,
+                subBass: bands.subBass ? bands.subBass.norm : 0,
+                energy: metrics.energy,
+                beat: metrics.beat ? 1 : 0,
+                beatPulse: metrics.beatPulse,
+                centroid: metrics.centroid,
+                flux: metrics.flux,
+                centroidRaw: metrics.centroid,
+                level: metrics.level
+            };
         },
         // exposed for scripts/test-audio-range.js
         _rangeNorm: rangeNorm,

@@ -19,6 +19,7 @@
     const fluidCanvas = $('fluid-canvas');
     const canvas2d = $('viz2d');
     const fractalCanvas = $('fractal-canvas');
+    const geometryCanvas = $('geometry-canvas');
 
     /* --------------------------- platform -------------------------------- */
 
@@ -41,13 +42,13 @@
     /* ------------------------- mode registry ----------------------------- */
 
     const MODES = [];
-    let fluidAvailable = false, fractalAvailable = false;
+    let fluidAvailable = false, fractalAvailable = false, geometryAvailable = false;
 
     // The shader scenes, plus the one fluid mode built on the same Julia seed.
     // The rest of the fluid and 2D libraries still load; they are simply not
     // registered. Add an id to FLUID_KEEP, or drop `hidden` from a fractal
     // mode, to put one back.
-    const FLUID_KEEP = ['julia-flow'];
+    const FLUID_KEEP = ['julia-flow','spectrum-fountain','nebula-bloom','kaleidofluid','attractor-bloom'];
 
     function buildRegistry() {
         window.FluidModes.list
@@ -56,13 +57,15 @@
         window.FractalModes.list
             .filter(m => !m.hidden)
             .forEach(m => MODES.push(Object.assign({ engine: 'fractal' }, m)));
-        // The canvas-2D modes read the analyser directly — spectrogram,
-        // vectorscope, chroma wheel and friends — so they show the music's
-        // structure rather than reacting to its loudness. They were written
-        // but never registered, which is why none of them were reachable.
         window.Viz2DModes.list
             .filter(m => !m.hidden)
             .forEach(m => MODES.push(Object.assign({ engine: '2d' }, m)));
+        // New: Geometry & Hybrid — minimalist high-impact modes (Boller flower, Teoxoy rings, Matt DesLauriers minimalism)
+        if (window.GeometryModes) {
+            window.GeometryModes.list
+                .filter(m => !m.hidden)
+                .forEach(m => MODES.push(Object.assign({ engine: 'geometry' }, m)));
+        }
     }
 
     const state = {
@@ -103,10 +106,12 @@
     // y is stored GL-style (0 at the bottom) because both the fluid splats and
     // the fractal shader work that way; `sy` is the screen-space counterpart
     // for the canvas-2D mode.
+    // Next-Gen: multi-pointer array for true multi-touch fluid manipulation.
     const pointer = {
         x: 0.5, y: 0.5, sy: 0.5,
         vx: 0, vy: 0,
-        down: false, active: false, moving: false, repel: false
+        down: false, active: false, moving: false, repel: false,
+        pointers: [] // [{x,y,sy,vx,vy,active,down,repel,moving}]
     };
     let lastPx = 0, lastPy = 0, havePointer = false, moveFrames = 0;
 
@@ -239,21 +244,59 @@
         toast('View reset.');
     });
 
+    // Multi-touch: build pointers[] from TouchList for FluidEngine multi-splat.
+    // Each finger gets its own x/y/vx/vy so fluid can be sculpted with two hands.
+    const touchPrev = new Map();
+    function syncMultiPointer(touches){
+        const el = activeCanvas();
+        const cw = el.clientWidth || window.innerWidth;
+        const ch = el.clientHeight || window.innerHeight;
+        const arr=[];
+        for(let i=0;i<touches.length;i++){
+            const t=touches[i];
+            const nx = t.clientX / cw, ny = 1 - t.clientY / ch, sy = t.clientY / ch;
+            const id = t.identifier;
+            const prev = touchPrev.get(id) || {x:nx, y:ny};
+            const vx = nx - prev.x, vy = ny - prev.y;
+            touchPrev.set(id, {x:nx, y:ny});
+            arr.push({ x:nx, y:ny, sy, vx, vy, active:true, down:true, repel: touches.length>1 && i>0, moving: Math.hypot(vx,vy)>0.0005 });
+        }
+        // prune lifted
+        for(const k of Array.from(touchPrev.keys())){
+            let alive=false; for(let i=0;i<touches.length;i++) if(touches[i].identifier===k) alive=true;
+            if(!alive) touchPrev.delete(k);
+        }
+        pointer.pointers = arr;
+        if(arr.length){
+            // also keep primary pointer in sync for fractal pan
+            pointer.x = arr[0].x; pointer.y = arr[0].y; pointer.sy = arr[0].sy;
+            pointer.vx = arr[0].vx; pointer.vy = arr[0].vy;
+            pointer.active = true; pointer.down = true; pointer.repel = arr.length>1;
+            if(Math.abs(pointer.vx)>0.0008||Math.abs(pointer.vy)>0.0008) moveFrames=6;
+        }
+        return arr;
+    }
+
     function updatePointer() {
         // `moving` lingers a few frames so a fast flick still paints a stroke
         // rather than a single dot.
         if (moveFrames > 0) { moveFrames--; pointer.moving = true; }
         else { pointer.moving = false; pointer.vx *= 0.85; pointer.vy *= 0.85; }
+        // keep pointers moving flag in sync
+        if(pointer.pointers && pointer.pointers.length){
+            for(const p of pointer.pointers){ if(moveFrames>0) p.moving=true; else { p.moving=false; p.vx*=0.85; p.vy*=0.85; } }
+        }
     }
 
-    window.addEventListener('mousemove', e => pointerMove(e.clientX, e.clientY));
+    window.addEventListener('mousemove', e => { pointerMove(e.clientX, e.clientY); pointer.pointers=[{x:pointer.x,y:pointer.y,sy:pointer.sy,vx:pointer.vx,vy:pointer.vy,active:pointer.active,down:pointer.down,repel:pointer.repel,moving:pointer.moving}]; });
     window.addEventListener('mousedown', e => {
         if (inPanel(e.target)) return;
         pointer.down = true;
         pointer.repel = e.shiftKey || e.button === 2;
+        pointer.pointers=[{x:pointer.x,y:pointer.y,sy:pointer.sy,vx:pointer.vx,vy:pointer.vy,active:true,down:true,repel:pointer.repel,moving:pointer.moving}];
     });
-    window.addEventListener('mouseup', () => { pointer.down = false; });
-    window.addEventListener('mouseleave', () => { pointer.active = false; pointer.down = false; });
+    window.addEventListener('mouseup', () => { pointer.down = false; pointer.pointers=[]; });
+    window.addEventListener('mouseleave', () => { pointer.active = false; pointer.down = false; pointer.pointers=[]; });
     window.addEventListener('contextmenu', e => {
         if (!inPanel(e.target)) e.preventDefault();
     });
@@ -262,20 +305,22 @@
         if (inPanel(e.target)) return;
         if (e.touches.length) {
             pointer.down = true;
-            // Two fingers repel instead of attract — a second gesture with
-            // no extra UI.
             pointer.repel = e.touches.length > 1;
+            syncMultiPointer(e.touches);
             pointerMove(e.touches[0].clientX, e.touches[0].clientY);
         }
     }, { passive: true });
     window.addEventListener('touchmove', e => {
-        if (e.touches.length) pointerMove(e.touches[0].clientX, e.touches[0].clientY);
+        if (e.touches.length) { syncMultiPointer(e.touches); pointerMove(e.touches[0].clientX, e.touches[0].clientY); }
     }, { passive: true });
-    window.addEventListener('touchend', () => {
-        pointer.down = false;
-        havePointer = false;
-        // Keep `active` on briefly so the release still reads as a gesture.
-        setTimeout(() => { if (!pointer.down) pointer.active = false; }, 1200);
+    window.addEventListener('touchend', e => {
+        if(e.touches.length===0){
+            pointer.down = false; havePointer = false; pointer.pointers=[];
+            touchPrev.clear();
+            setTimeout(() => { if (!pointer.down) pointer.active = false; }, 1200);
+        } else {
+            syncMultiPointer(e.touches);
+        }
     }, { passive: true });
 
     /* --------------------------- frame context ---------------------------- */
@@ -308,12 +353,16 @@
 
     function activeCanvas() {
         const e = currentMode() ? currentMode().engine : 'fluid';
-        return e === '2d' ? canvas2d : e === 'fractal' ? fractalCanvas : fluidCanvas;
+        if (e === '2d') return canvas2d;
+        if (e === 'fractal') return fractalCanvas;
+        if (e === 'geometry') return geometryCanvas;
+        return fluidCanvas;
     }
 
     function engineAvailable(mode) {
         if (mode.engine === 'fluid') return fluidAvailable;
         if (mode.engine === 'fractal') return fractalAvailable;
+        if (mode.engine === 'geometry') return geometryAvailable;
         return true;
     }
 
@@ -340,6 +389,7 @@
         fluidCanvas.classList.toggle('inactive', m.engine !== 'fluid');
         canvas2d.classList.toggle('inactive', m.engine !== '2d');
         fractalCanvas.classList.toggle('inactive', m.engine !== 'fractal');
+        geometryCanvas.classList.toggle('inactive', m.engine !== 'geometry');
 
         if (m.engine === 'fluid') {
             // The canvas was display:none and reported zero size, so
@@ -357,6 +407,9 @@
         } else if (m.engine === '2d') {
             V.resize();
             V.setMode(m);
+        } else if (m.engine === 'geometry') {
+            window.GeometryEngine.resize();
+            window.GeometryEngine.setMode(m);
         } else {
             FR.resize();
         }
@@ -446,12 +499,16 @@
                         P.hdr(P.flow(Math.random() * 0.2), 5.0));
             }
 
-            const vort = F.config.CURL + m.band.presence.env * 25 * ctx.k;
-            const diss = Math.max(0.90, F.config.DENSITY_DISSIPATION - m.band.mid.env * 0.03 * ctx.k);
+            // Next-Gen audio params via helper
+            const ap = F.applyAudioParams ? F.applyAudioParams(m, ctx.k) : { vort: F.config.CURL + m.band.presence.env * 25 * ctx.k, diss: Math.max(0.90, F.config.DENSITY_DISSIPATION - m.band.mid.env * 0.03 * ctx.k) };
+            const vort = ap.vort, diss = ap.diss;
             const fold = state.fractalFold >= 0 ? state.fractalFold : (mode.fractal || 0);
             F.solve(dt, vort, diss, fold, vt);
         } else if (mode.engine === '2d') {
             V.frame(vt, m, ctx);
+        } else if (mode.engine === 'geometry') {
+            window.GeometryEngine.frame(vt, m, ctx);
+            // Hybrid: geometry already seeds fluid when FluidEngine ready; no swap needed
         } else if (mode.engine === 'fractal' && fractalAvailable) {
             // Fractals read their own clock 10000x slower than everything
             // else: a rate that looks like a gentle drift in a fluid sim is a
@@ -493,9 +550,11 @@
 
         if (pendingSnapshot) { pendingSnapshot = false; captureFrame(); }
 
-        // The engines have just drawn into their own canvas; in a headset the
-        // XR module paints that canvas onto the curved screen for both eyes.
-        if (xrFrame) XR.frame(xrFrame);
+        // Next-Gen XR: paint canvas to HMD — XRNext handles 6DOF worldOffset
+        if (xrFrame) {
+            if (XR_ACTIVE && XR_ACTIVE.frame) XR_ACTIVE.frame(xrFrame);
+            else XR.frame(xrFrame);
+        }
 
         updateMeters(m);
         updateSpotifyProgress();
@@ -503,7 +562,7 @@
         handleAutoHide();
         checkPerformance(now);
 
-        XR.raf(loop);
+        (XR_ACTIVE && XR_ACTIVE.raf ? XR_ACTIVE.raf : XR.raf)(loop);
     }
 
     function checkPerformance(now) {
@@ -659,6 +718,58 @@
                 toast('Playing ' + e.target.files[0].name);
             }
         });
+        // --- Next-Gen: Demo rave + YouTube ---
+        const demoLabelEl = $('demo-label');
+        function refreshDemoLabel(){
+            try{
+                const t = A.DEMO_TRACKS ? A.DEMO_TRACKS.findIndex((_,i)=>true) : 0;
+                // show current track bpm from AudioEngine if demo playing
+                const cur = A.DEMO_TRACKS ? A.DEMO_TRACKS[0] : null;
+                if(demoLabelEl && cur) demoLabelEl.textContent = cur.bpm + ' BPM';
+            }catch(e){}
+        }
+        const btnDemo = $('btn-demo'), btnDemoNext = $('btn-demo-next'), btnDemoStop = $('btn-demo-stop');
+        if(btnDemo){
+            btnDemo.addEventListener('click', async () => {
+                try{
+                    // unlock audio context on gesture (iOS)
+                    A.unlock(); await A.useDemo(0);
+                    const track = A.DEMO_TRACKS ? A.DEMO_TRACKS[0] : {title:'Demo Rave'};
+                    toast('Demo raving: ' + track.title + ' — analyzer wired direct (no picker)');
+                    if(demoLabelEl) demoLabelEl.textContent = track.bpm + ' BPM';
+                    // auto-select a hybrid/high-energy mode for instant wow
+                    const hybridIdx = MODES.findIndex(m=> m.id==='bloom-grid' || m.id==='attractor-bloom');
+                    if(hybridIdx>=0) applyMode(hybridIdx);
+                }catch(e){ toast('Demo failed: '+ (e.message||e), true); }
+            });
+        }
+        if(btnDemoNext){
+            btnDemoNext.addEventListener('click', async () => {
+                try{ const el = A.nextDemo(); const idx = A.DEMO_TRACKS ? (A.DEMO_TRACKS.findIndex(t=> el && el.src && el.src.indexOf(t.url.slice(-12))>=0)) : -1;
+                    const track = A.DEMO_TRACKS ? A.DEMO_TRACKS[(idx+1)%A.DEMO_TRACKS.length] : null;
+                    toast('Next demo: ' + (track?track.title:'track')); if(demoLabelEl && track) demoLabelEl.textContent = track.bpm + ' BPM';
+                }catch(e){ toast('Next demo failed', true); }
+            });
+        }
+        if(btnDemoStop){
+            btnDemoStop.addEventListener('click', () => { A.disconnect(); toast('Demo stopped. Pick another source.'); });
+        }
+        const ytInput = $('yt-url'), btnYt = $('btn-yt-load');
+        if(btnYt && ytInput){
+            const playYt = async () => {
+                const v=ytInput.value.trim();
+                if(!v){ toast('Paste a YouTube link or direct MP3 URL', true); return; }
+                // Direct MP3 heuristic
+                if(v.match(/\.(mp3|ogg|wav|m4a)(\?|$)/i)){
+                    try{ A.useMediaElement(v, 'url: '+v, {loop:true}); toast('Streaming: '+v); }catch(e){ toast('URL play failed', true); }
+                    return;
+                }
+                const res = await A.useYouTube(v);
+                if(res) toast('YouTube audio wired (if server resolver present).');
+            };
+            btnYt.addEventListener('click', playYt);
+            ytInput.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); playYt(); }});
+        }
 
         A.onStatus((kind, detail) => {
             const dot = $('source-status').querySelector('.dot');
@@ -770,6 +881,34 @@
 
         $('btn-reset-view').addEventListener('click', resetView);
         $('btn-clear').addEventListener('click', () => { F.clear(); toast('Canvas cleared.'); });
+        // Next-Gen fractal morph & fly-through
+        const sliderMorph = $('slider-morph'), sliderMorphRate = $('slider-morph-rate');
+        if(sliderMorph){
+            bindSlider('slider-morph', 'val-morph', v => { if(FR.setMorph) FR.setMorph(v/100); }, v => Math.round(v)+'%');
+        }
+        if(sliderMorphRate){
+            bindSlider('slider-morph-rate', 'val-morph-rate', v => { if(FR.setMorphRate) FR.setMorphRate(v/100 * 2); }, v => Math.round(v)+'%');
+        }
+        bindSwitch('sw-fly', false, on => {
+            if(FR.setFlyThrough) FR.setFlyThrough(on, parseFloat($('slider-fly').value));
+            toast(on ? 'Fly-through ON — drift through fractals, audio-coupled.' : 'Fly-through OFF');
+        });
+        bindSlider('slider-fly', 'val-fly', v => {
+            if(FR.setFlyThrough && FR.isFlyThrough && FR.isFlyThrough()) FR.setFlyThrough(true, v);
+            if(window.XRNext) window.XRNext.setFlySpeed(v);
+        }, v => v.toFixed(1)+'×');
+        // Auto-demo hint if no source after 2s
+        setTimeout(()=>{
+            if(A.sourceLabel()==='none' && !A.isStarted()){
+                const hint = document.createElement('div');
+                hint.className='note';
+                hint.style.cssText='background:rgba(255,0,92,0.10); border:1px solid rgba(255,0,92,0.28); padding:8px; border-radius:8px; margin-top:6px;';
+                hint.innerHTML='⚡ <strong>Try Demo Rave</strong> for instant visuals — no capture dialog. One click → full reactivity.';
+                const sec = document.querySelector('[data-section="source"] .section-body');
+                if(sec) sec.appendChild(hint);
+                setTimeout(()=> hint.remove(), 7000);
+            }
+        }, 2200);
 
         // --- fractal ---
         bindSlider('slider-detail', 'val-detail', v => { state.detail = v / 100; },
@@ -1225,9 +1364,11 @@
     }
 
     /* -------------------------------- VR ----------------------------------- */
+    // Prefer next-gen 6DOF XR if present, else legacy
+    const XR_ACTIVE = (window.XRNext && window.XRNext.available) ? window.XRNext : XR;
 
     function setupXR() {
-        XR.init({
+        XR_ACTIVE.init({
             // The engines already drew this frame; hand the XR module whichever
             // canvas the active mode painted into.
             canvasFor: activeCanvas,
@@ -1255,27 +1396,55 @@
                 else if (id === 'mode-next') stepMode(1);
                 else if (id === 'mode-prev') stepMode(-1);
                 else if (id === 'mode-rand') randomMode();
-                else if (id === 'exit') XR.stop();
-                XR.markDirty();
+                else if (id === 'exit') XR_ACTIVE.stop();
+                XR_ACTIVE.markDirty();
+            },
+
+            // Next-Gen XR hooks: spatial splat + pinch
+            spatialSplat: (x,y,z,vx,vy,vz) => {
+                // Map world hit to fluid UV if fluid is active; else geometry pointer
+                if (fluidAvailable && window.FluidEngine && window.FluidEngine.isReady()) {
+                    // Convert world pos (approx) to 0..1 UV: inverse of sphere mapping
+                    // Quick heuristic: use pointer UV already computed for screen hits
+                    // For direct 3D, inject a small central splat with velocity
+                    if (vx !== undefined) {
+                        const hue = P.flow(Math.random()*0.5, 0.6);
+                        // use active pointer pos as fallback for UV
+                        const uvX = 0.5 + (x||0)*0.04, uvY = 0.5 + (y||0)*0.04;
+                        window.FluidEngine.splat(Math.max(0,Math.min(1,uvX)), Math.max(0,Math.min(1,uvY)), vx||0, vy||0, P.hdr(hue, 3.5));
+                    }
+                }
+            },
+            onPinch: (u,v) => { if (fluidAvailable) { const hue=P.flow(0.5,0.6); window.FluidEngine.splat(u,v, (Math.random()-0.5)*12, (Math.random()-0.5)*12, P.hdr(hue,3.2)); } },
+            onWorldMove: (off) => {
+                // Fly-through: feed offset into fractal pan (screen-uv units)
+                if (currentMode() && currentMode().engine==='fractal') {
+                    state.pan.x += off.x*0.04;
+                    state.pan.y += off.y*0.04;
+                }
             },
 
             onChange: active => {
                 const b = $('btn-vr');
                 if (b) b.textContent = active ? 'Exit VR' : 'Enter VR';
+                if (XR_ACTIVE.getWorldOffset) $('btn-vr').title = active ? '6DOF spatial — thumbstick to fly, grip to drag' : 'Enter VR (6DOF)';
                 if (!active) toast('Left VR.');
             }
         });
 
         const btn = $('btn-vr');
         if (!btn) return;
-        XR.available().then(ok => {
+        XR_ACTIVE.available().then(ok => {
             if (!ok) return;   // stays hidden on machines with no headset
             btn.hidden = false;
+            // Label distinguishes next-gen
+            if (window.XRNext) btn.textContent = 'Enter VR 6DOF';
             btn.addEventListener('click', async () => {
-                if (XR.isActive()) { XR.stop(); return; }
+                if (XR_ACTIVE.isActive()) { XR_ACTIVE.stop(); return; }
                 try {
-                    await XR.start();
-                    toast('In VR: trigger on the screen paints, aim at the panel for controls.');
+                    await XR_ACTIVE.start();
+                    if (window.XRNext) toast('6DOF VR: thumbstick fly · grip drag · trigger paint · pinch sparkle');
+                    else toast('In VR: trigger on the screen paints, aim at the panel for controls.');
                 } catch (err) {
                     toast('Could not start VR: ' + String(err.message || err), true);
                 }
@@ -1291,8 +1460,9 @@
         fluidAvailable = F.init(fluidCanvas);
         fractalAvailable = FR.init(fractalCanvas);
         V.init(canvas2d);
+        geometryAvailable = window.GeometryEngine ? window.GeometryEngine.init(geometryCanvas) : true;
 
-        if (!fluidAvailable && !fractalAvailable) $('fallback').style.display = 'block';
+        if (!fluidAvailable && !fractalAvailable && !geometryAvailable) $('fallback').style.display = 'block';
 
         setupUI();
         setupXR();
@@ -1315,7 +1485,7 @@
             setPanel(savedPanel !== '0');
         }
 
-        const onViewportChange = () => { F.resize(); V.resize(); FR.resize(); };
+        const onViewportChange = () => { F.resize(); V.resize(); FR.resize(); if(window.GeometryEngine) window.GeometryEngine.resize(); };
         window.addEventListener('resize', onViewportChange);
         window.addEventListener('orientationchange', () => setTimeout(onViewportChange, 250));
         if (window.visualViewport) {
