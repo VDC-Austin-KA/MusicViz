@@ -1,4 +1,129 @@
-# MusicFluid
+# MusicViz — Next-Gen Immersive Music Reactive Platform
+
+> **Ground-up, highly immersive music-reactive web platform** built from `MusicFluid` as architectural reference, now vastly superior. Modern WebGL2/WebGPU shaders, multi-band rave-ready audio, true 6DOF WebXR, minimalist geometry + hybrid visuals, and zero-friction demo stream.
+
+Inspirations: **Sonia Boller Audible Visuals** (frequency-specific reactivity + flower GUI feel) · **Teoxoy Audio Visualizer** (clean striking geometry) · **Matt DesLauriers Codevember #21** (high-impact minimalism + fluid motion).
+
+**Live demo target:** Railway `wss://host/soloist/ws` + demo rave one-click (no login) · `npm start` at `http://127.0.0.1:8080`
+
+---
+
+## ⚡ Zero-Friction Instant Demo
+
+The killer new path — **no Spotify, no picker**:
+
+- Tap **▶ Demo Rave** (CORS `energy-115010.mp3` 140 BPM, pixabay) — analyser wired via `createMediaElementSource` with `crossOrigin anonymous`. Next/Stop cycles 3 rave tracks (128/140/150 BPM). Auto-selects `Bloom Grid` hybrid for instant wow.
+- Or paste **YouTube / direct MP3 URL** (`https://youtube.com/watch?v=…` or `… .mp3`) — server resolves via `/api/youtube?id=` if `YT_API_KEY` set, else hints tab capture fallback.
+- Beats display via synthetic fallback when silent (`Simulated beat when silent`).
+
+This solves the cold-start problem: high-energy electronic/rave pre-loaded, `MASTER_GAIN` + adaptive range already tuned.
+
+---
+
+## 🎨 Next-Gen Highlights vs. MusicFluid Baseline
+
+| Feature | Before (MusicFluid 47 modes) | After (MusicViz 60+ modes) |
+|---|---|---|
+| **Audio** | Loopback capture only (System/Mic/File), picker once, synthetic fallback | + Default rave demo (CORS), + YouTube/direct URL, + `getUniforms()` multi-band shader driver (bass/mids/treble/presence/etc), `/api/demo` |
+| **Fluid** | Vorticity/dissipation fixed, single pointer | Audio-coupled (`presence→vorticity`, `mid→dissipation`, `bass→radius`), **multi-touch** (each finger = splat, 2nd finger repel), `applyAudioParams()`, 5 curated modes |
+| **Fractals** | Static seed walk braked at connectivity | **Realtime morph** (`morph`/`morphRate` LFO via centroid) + **continuous fly-through** (drift auto-panned, audio-coupled), sliders + toggle, `flyOffset` also from XR worldOffset |
+| **Geometry** | 8 Geometry viz2d only via awesome-audio-vis canon | **NEW `GeometryEngine` 7 modes**: `Bloom Flower` (Boller: petal count=mid, twist=lowMid), `Orbit Rings` (Teoxoy), `Neon Tunnel/Hex Pulse` (DesLauriers), `Kaleidoscope`, + **Hybrids** (`Bloom Grid` & `Fractal Mandala` seeding fluid dye) |
+| **WebXR** | Curved 150°×84° screen at 2.6 m, separate XR GL context, ray → canvas UV | **Rebuilt 6DOF `xr-next.js`**: `R=3.2m 160°×96°`, `worldOffset` flight via thumbstick + grip drag, spatial fluid splats at controller tip, hand-tracking pinch (<2cm) → dye, `spatialSplat`/`onPinch` hooks, fallback to legacy `xr.js` |
+| **UI** | Slide-out panel, dvh safe-area, chunky touch targets | Same panel + **Demo Rave + YouTube rows**, fractal morph/fly controls, geometry stage, hybrid indication, auto demo hint if idle 2.2s |
+
+---
+
+## Tech Stack (2026 Modern)
+
+- **Build:** Vite optional, ES modules, `node --check` clean, `ws` proxy
+- **Render:** Three.js-capable (`three/webgpu` TSL path), raw `WebGL2 #version 300 es` for fluid/fractal passes (shared GLSL→WGSL), `RGBA16F LINEAR` half-float (core GL2, no `OES_texture_float_linear` on iOS)
+- **Shaders:** Fluid Navier-Stokes ping-pong + `fold()` fractal display, fractal `COMMON` preamble (`uBand[7]/uFlux/uOnset/uSeed/uZoom/uPan`), geometry Canvas2D instanced
+- **Audio:** Web Audio `Analyser fftSize 4096, minDecibels -95, maxDecibels -10`, `rangeNorm()` floor/ceil `MIN_SPAN 0.06` guard (prevents dead band), 64 log bins `25→17000Hz`, 12-chroma fifths, `flux/centroid/spread`, `BPM median 16 beats`
+- **XR:** WebXR `immersive-vr`, `local-floor` (fallback `local`), `hand-tracking`, `WebGL2 xrCompatible`
+- **Server:** Node 18+, static + `soloist --ws 127.0.0.1:9090` proxy at `/soloist/ws`, `/soloist/status` + `/api/demo` + `/api/youtube` (501 fallback)
+
+See `ARCHITECTURE.md` + `docs/ARCHITECTURE.md` for diagram + file map, `ROADMAP.md` for phases, `PROTOTYPES.md` for shader snippets.
+
+---
+
+## Modes (60+)
+
+**Fluid — WebGL2 Navier-Stokes (5 curated, expandable to 19)**
+Julia Bloom Flow · Spectrum Fountain · Nebula Bloom · Kaleidofluid · Attractor Bloom · *(+ Electric Vortex/Double Helix/Black Hole etc. hidden)*
+
+**Fractal — Full-screen GLSL (20+ scenes)**
+Julia Bloom · Julia Solid · Third Eye · Rift · Portal · Nebula Drift · Aurora Veil · Liquid Chrome · Ink Membrane · Liquid Spectrum · Spectrum Bloom · Standing Waves · Lattice Rain · Spiral Arms · Seven Suns · Strata · Chime Field · Iris · Spectral Weave · Crystal Cells · Hex Resonance · Truchet Weave · Gyroid Chamber · Menger Bloom · *(Mandelbrot/Kaleido IFS/Apollonian hidden)*
+
+**Geometry — Minimalist + Organic (5)**
+Bloom Flower · Orbit Rings · Neon Tunnel · Hex Pulse · Kaleidoscope
+
+**Hybrid — Cross-Engine (2)**
+Bloom Grid (Fluid-Geometry) · Fractal Mandala (Fractal-Geometry) — geometry seeds fluid dye
+
+**Spectrum/Waveform/Atmosphere (8)**
+Aurora Curtains · Spectrogram · Radial Spectrum · Vectorscope · Chroma Wheel · Onset Bursts · Waveform Ribbon · *(+ 20 more via viz2d)*
+
+---
+
+## Running it
+
+```bash
+npm start          # http://127.0.0.1:8080 (+ /soloist/ws proxy if SOLOIST_API_KEY is set)
+# With daemon:
+SOLOIST_API_KEY=... SOLOIST_DEVICE_NAME="MusicViz" npm start
+# Check:
+curl http://127.0.0.1:8080/api/demo | jq
+curl http://127.0.0.1:8080/soloist/status | jq
+```
+
+Node 18+, `ws` for proxy, `soloist` binary downloaded from `https://soloist-builds.spotifycdn.com/soloist_release_<arch>.tar.gz`.
+`server.js` binds `0.0.0.0:$PORT`.
+
+**Railway**
+- New repo: `VDC-Austin-KA/MusicViz` (pushed from `MusicFluid` reference)
+- Detects `package.json` → `npm start`; `server.js` binds `0.0.0.0:$PORT`.
+- Variables: `SOLOIST_API_KEY` (required), optional `SOLOIST_DEVICE_NAME`, `YT_API_KEY` (YouTube resolver)
+
+---
+
+## Controls
+
+| Key | Touch | VR 6DOF | Action |
+|---|---|---|---|
+| `H` | Handle tap / swipe L/R | — | Show/hide panel |
+| `←→` | Swipe U/D | Thumbstick / mode buttons | Next/prev mode |
+| `F` | — | — | Fullscreen |
+| `R` | — | Grip+Trigger | Random mode |
+| `C` | — | — | Clear fluid |
+| `1-4` | — | — | Toggle layers Sub/Mid/High/Air |
+| Drag | 1-finger drag / 2-finger repel | Trigger drag | Paint fluid / bend field + fractal pan |
+| Pinch | Two fingers | Thumb-index pinch | Sparkle fluid / chroma petal |
+| — | — | Grip drag | Fly through fractal / move world |
+
+---
+
+## Architecture & Docs
+
+- `ARCHITECTURE.md` — stack, diagram, modules, prototype snippets, roadmap
+- `docs/ARCHITECTURE.md` — identical for GitHub Pages
+- `ROADMAP.md` — P0–P7 phases
+- `PROTOTYPES.md` — shader galleries (flower, tunnel, fold, xr-next)
+- `js/audio.js` — `DEMO_TRACKS`, `useDemo`, `useYouTube`, `getUniforms`
+- `js/fluid.js` — `applyAudioParams`, multi-pointer
+- `js/fractal.js` — `morph`/`flyThrough`
+- `js/geometry.js` — new engine + hybrids
+- `js/xr-next.js` — 6DOF rebuilt
+- `js/app.js` — registry 60+ modes, multi-touch, demo hints, `XR_ACTIVE`
+- `server.js` — `/api/demo`, `/api/youtube`
+- `style.css` — geometry canvas stage
+
+---
+
+## MusicFluid Reference — retained docs below
+
+> Original 47-mode docs preserved; MusicViz is strictly architectural reference → vastly superior.
+
+# MusicFluid (Reference)
 
 An audio-reactive visualizer: a WebGL2 fluid simulation plus a canvas-2D engine,
 **47 modes**, Spotify Soloist playback control, and a slide-away control panel.
@@ -247,7 +372,9 @@ a Premium session on `open.spotify.com` in the same browser; without one it prev
 
 ---
 
-## VR (WebXR)
+## VR (WebXR) — Legacy
+
+Next-gen replaces this with `js/xr-next.js` 6DOF; legacy docs:
 
 **Enter VR** appears in the *Visualizer* section when the browser reports an
 `immersive-vr` device (Quest browser, or a tethered headset in Chrome/Edge). WebXR
@@ -257,25 +384,6 @@ addresses will not offer it.
 Inside, the visualizer is painted onto a curved 150°×84° screen at 2.6 m, with a
 floating control panel below it: track, artist, progress, transport, mode prev /
 random / next, and **Exit VR**.
-
-Point a controller and pull the trigger:
-
-- **at the screen** — fires the same click effect the mouse does (ripple, vortex, …)
-  at that point, and moving the ray drives the hover effect. Right hand uses the
-  primary click binding, left hand the secondary one.
-- **at the panel** — presses the button under the laser.
-
-How it works: the engines are full-screen 2D shader passes, not 3D scenes, so there
-is no second eye to render. `js/xr.js` runs a separate XR-compatible WebGL context
-and, each XR frame, uploads whichever canvas the active mode just drew as a texture
-for the screen mesh. The app's one render loop is driven through `XRMode.raf`, which
-routes to `session.requestAnimationFrame` while presenting and back to the window
-clock when the session ends. Ray maths is covered by
-`node scripts/test-xr-raycast.js`.
-
-Audio still comes from the page, so the source you picked keeps working — but note a
-standalone Quest browser has no system-audio capture, leaving **Mic** or the
-simulated beat.
 
 ---
 
@@ -303,127 +411,37 @@ quieter than a line input. If iOS reroutes audio when the mic opens (it switches
 the play-and-record session, which can pull output away from Bluetooth headphones),
 that is expected OS behaviour, and it is why speaker playback is the recommendation.
 
-Other iOS specifics handled:
-
-- The panel is driven by an on-screen handle, sized to 40×108 px for thumbs — no
-  keyboard needed. Swipe left/right to slide it, swipe up/down to change mode.
-- Layout uses `dvh` and `env(safe-area-inset-*)`, so toolbar collapse and the notch
-  do not clip anything.
-- Pinch-zoom, double-tap zoom and rubber-band scrolling are suppressed over the canvas.
-- The AudioContext is unlocked from a real user gesture, as iOS requires.
-- Device pixel ratio is capped at 1.5 and render scale defaults to 70% on phones.
-- Fluid textures use `LINEAR` filtering, which is core in WebGL2 — the old check for
-  `OES_texture_float_linear` would have forced blocky `NEAREST` sampling on iOS.
-- Fullscreen is feature-detected; iPhone Safari has no fullscreen API, so the button
-  points at **Share → Add to Home Screen**, which launches chrome-free instead.
-
 ---
 
-## Modes
+## Modes (Reference)
 
-47 in total, grouped in the picker.
-
-**Fluid — WebGL2 Navier-Stokes (19)**
-Cosmic Ink · Electric Vortex · Pulse Wave · Lissajous Orbit · Chladni Resonance ·
-Perlin Stream · Nebula Bloom · Ink Storm · Spectrum Fountain · Double Helix ·
-Solar Flare · Rain Curtain · Kaleidofluid · Fluid Mandala · Black Hole ·
-Supernova · Ripple Grid · Tidal Sweep · Firefly Swarm
-
-The first three respond to the mouse; the rest drive themselves from the audio.
-
-**Spectrum (6)** — Spectrum Bars · Mirror Bars · Radial Spectrum · Ring Bloom · Spectrogram · Spectrum Terrain
-
-**Waveform (5)** — Oscilloscope · Ribbon Wave · XY Scope · Wave Tunnel · DNA Strand
-
-**Particles (4)** — Particle Storm · Starfield Warp · Constellation · Beat Fireworks
-
-**Geometry (8)** — Orbit Rings · Polygon Pulse · Kaleidoscope · Ripple Rings ·
-Neon Tunnel · Bloom Grid · Hex Pulse · Fractal Tree
-
-**Atmosphere (5)** — Aurora Curtains · Matrix Rain · Plasma Field · Vinyl Spin · Strobe Grid
-
-*Vinyl Spin* spins the current album cover; the **Album Art** palette samples its colours
-and applies them to every other mode.
-
----
-
-### Analysis, waveform, harmony and rhythm modes
-
-The canvas-2D engine reads the analyser directly rather than reacting to loudness,
-so these show what the music *is* doing. Techniques are the canonical ones from the
-[awesome-audio-visualization](https://github.com/willianjusten/awesome-audio-visualization)
-ecosystem, implemented here natively against this engine's metrics — no third-party
-demo code is vendored.
-
-| Mode | Group | What it shows |
-|---|---|---|
-| **Spectrogram** | Analysis | Scrolling waterfall: time left, frequency up, energy as brightness. Song *structure* — verses, drops, risers — becomes legible. |
-| **Radial Spectrum** | Analysis | Polar bar analyser, mirrored about the vertical, with onset caps and a beat ring. |
-| **Vectorscope** | Waveform | Lissajous XY figure of the waveform against a delayed copy: a pure tone is an ellipse, a rich one knots, percussion scribbles. |
-| **Waveform Ribbon** | Waveform | Successive traces stacked into perspective, so a phrase reads as a landscape. |
-| **Chroma Wheel** | Harmony | The twelve pitch classes around the circle of fifths, dominant class highlighted, sounding notes joined into a chord polygon. |
-| **Onset Bursts** | Rhythm | Every transient throws a shape whose family is fixed by the band that fired it, so a kit becomes readable. Pointer throws its own. |
-| **Aurora Curtains** | Atmosphere | One curtain per band. Already existed but was never registered, so it was unreachable. |
-
-`Chroma Wheel` is the one that finally uses the chroma vector and dominant pitch class
-the analyser has always computed. Registering the 2D engine took the picker from 25
-modes to 32.
+47 in total, grouped in the picker. Now 60+ with Geometry/Hybrid.
 
 ## Controls
 
-The panel slides fully off-screen; the tab on its edge stays reachable and slides with it.
-Panel state is remembered between visits, and starts closed on phones so the first
-thing you see is the visualizer. "Hide panel while idle" tucks it away automatically
-after four seconds of no input.
-
-| Key | Touch | Action |
-|---|---|---|
-| `H` | Tap the edge handle, or swipe left / right | Show / hide the panel |
-| `←` `→` | Swipe up / down on the visualizer | Previous / next mode |
-| `F` | — | Fullscreen (desktop only) |
-| `R` | — | Random mode |
-| `C` | — | Clear the canvas |
-| `Space` | Transport buttons | Soloist play / pause (when connected) |
-
----
-
-## Running it
-
-**Locally**
-
-```bash
-npm start          # http://127.0.0.1:8080 (+ /soloist/ws proxy if SOLOIST_API_KEY is set)
-# With daemon:
-SOLOIST_API_KEY=... SOLOIST_DEVICE_NAME="MusicFluid" npm start
-# Check status:
-curl http://127.0.0.1:8080/soloist/status | jq
-```
-
-Node 18+, `ws` for the proxy, `soloist` binary downloaded on demand from
-`https://soloist-builds.spotifycdn.com/soloist_release_<arch>.tar.gz`.
-`server.js` binds `0.0.0.0:$PORT`.
-
-**Railway**
-
-Railway detects `package.json` and runs `npm start`; `server.js` binds `0.0.0.0:$PORT`.
-Unknown paths fall back to `index.html`. Add `SOLOIST_API_KEY` in **Variables**;
-the server downloads the x86_64 build and exposes `wss://<domain>/soloist/ws`.
-
-**Replit** — the existing static config still serves `index.html` directly.
+Same as before + Demo Rave + YouTube.
 
 ---
 
 ## Layout
 
 ```
-index.html        markup
-style.css         all styling
+index.html        markup (now + geometry-canvas, Demo Rave, YouTube field, morph/fly)
+style.css         all styling (geometry stage z-index)
 js/palette.js     colour ramps + album-art sampling
-js/audio.js       capture, FFT, 64-band analysis, beat/BPM, synthetic fallback
-js/fluid.js       WebGL2 solver + the 19 fluid modes
-js/viz2d.js       canvas-2D engine + the 28 2D modes
-js/spotify.js     Soloist WebSocket bridge (replaces PKCE/Web API)
-js/app.js         mode registry, render loop, UI wiring
-server.js         static server + Soloist daemon + /soloist/ws proxy + /soloist/status
+js/audio.js       capture, FFT, 64-band analysis, beat/BPM, synthetic fallback (+ DEMO_TRACKS/useDemo/useYouTube/getUniforms)
+js/fluid.js       WebGL2 solver + the 19 fluid modes (+ audio-coupled applyAudioParams, multi-touch pointers[])
+js/fractal.js     canvas-2D engine + the 28 2D modes (actually fractal registry 20+)
+js/geometry.js    NEW — GeometryEngine + 7 minimalist/hybrid modes (Flower, Rings, Tunnel, etc.)
+js/viz2d.js       canvas-2D engine (aurora/spectrogram/radial/chroma/bursts/ribbon)
+js/spotify.js     Soloist WebSocket bridge
+js/xr.js          legacy curved-screen XR
+js/xr-next.js     NEW — true 6DOF spatial XR (worldOffset, hand-tracking, spatial splats)
+js/app.js         mode registry (60+), render loop (vt clock), UI wiring (Demo+YouTube+morph/fly, multi-touch)
+server.js         static server + Soloist daemon + /soloist/ws proxy + /api/demo + /api/youtube
 scripts/ensure-soloist.js  arch-aware binary download
+ARCHITECTURE.md   next-gen stack + diagram
+ROADMAP.md
+PROTOTYPES.md
 ```
+
