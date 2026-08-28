@@ -276,13 +276,7 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    if (pathname === '/' || pathname === '') {
-        // Greenfield Vite: prefer built dist/index.html in production (Railway)
-        // Fallback to root index.html for legacy/dev. Keeps both paths working.
-        const distIndex = path.join(ROOT, 'dist', 'index.html');
-        if (fs.existsSync(distIndex)) pathname = '/dist/index.html';
-        else pathname = '/index.html';
-    }
+    if (pathname === '/' || pathname === '') pathname = '/index.html';
 
     // Resolve inside ROOT only — blocks ../ traversal.
     const filePath = path.join(ROOT, pathname);
