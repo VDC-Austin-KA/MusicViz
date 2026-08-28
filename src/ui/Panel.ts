@@ -9,9 +9,11 @@ export type PanelOpts = {
   onDemoNext: () => void
   onDemoStop: () => void
   onYouTube: (url: string) => void
+  onSpotify: (url: string) => void
   onSystem: () => void
   onMic: () => void
   onFile: (f: File) => void
+  onSpotifyCapture: () => void
 }
 
 export function mountPanel(root: HTMLElement, modes: any[], opts: PanelOpts) {
@@ -32,13 +34,24 @@ export function mountPanel(root: HTMLElement, modes: any[], opts: PanelOpts) {
           <div class="grid3"><button id="b-demo" class="accent">▶ Demo Rave</button><button id="b-demo-next">Next</button><button id="b-demo-stop">■ Stop</button></div>
           <div class="note">Zero friction: pre-loaded 140 BPM rave drives analyser direct — no picker.</div>
         </div>
+        <div class="card" style="border-color: rgba(29,185,84,0.35); background: rgba(29,185,84,0.08);">
+          <label>Spotify Playlist — paste link <span class="hint" style="color:#1db954;">auto source</span></label>
+          <div class="row"><input id="sp-url" placeholder="https://open.spotify.com/playlist/...  or spotify:playlist:..." /><button id="b-sp" class="primary" style="background:#1db954; border-color:#1db954; color:#06210f; font-weight:700;">Load</button></div>
+          <div id="sp-embed-wrap" style="display:none; margin-top:8px;">
+            <iframe id="sp-embed" style="border-radius:12px; width:100%; height:352px; border:0; background:#121212;" src="about:blank" loading="lazy" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>
+            <button id="b-sp-capture" class="primary" style="width:100%; margin-top:8px; background:#1db954; border-color:#1db954; color:#06210f;">Listen to this player (tab capture)</button>
+            <div class="note" style="font-size:10px; margin-top:4px;">Embed plays in <em>this tab</em> — tab capture feeds analyser directly. Pick <strong>this tab</strong> + tick <strong>“Share tab audio”</strong> (once, then reused). Premium needed for full tracks.</div>
+          </div>
+        </div>
         <div class="card">
           <label>YouTube / audio URL <span class="hint">BETA</span></label>
           <div class="row"><input id="yt-url" placeholder="https://youtube.com/watch?v=… or …/track.mp3" /><button id="b-yt">Play</button></div>
         </div>
         <div class="status" id="s-status"><span class="dot"></span><span id="s-text">No audio source</span></div>
         <div id="meters" class="meters">
-          ${['Sub','Bass','Low','Mid','Hi','Pres','Air'].map(k=>`<div class="meter"><div class="bar"><i data-band="${k.toLowerCase()}"></i></div><span>${k}</span></div>`).join('')}
+          ${[
+            ['subBass','Sub'],['bass','Bass'],['lowMid','Low'],['mid','Mid'],['highMid','Hi'],['presence','Pres'],['air','Air']
+          ].map(([k,label])=>`<div class="meter"><div class="bar"><i data-band="${k}"></i></div><span>${label}</span></div>`).join('')}
         </div>
         <div id="bpm" class="note">Tempo —</div>
       </div>
@@ -103,6 +116,10 @@ export function mountPanel(root: HTMLElement, modes: any[], opts: PanelOpts) {
   $('b-demo-next')?.addEventListener('click', opts.onDemoNext)
   $('b-demo-stop')?.addEventListener('click', opts.onDemoStop)
   $('b-yt')?.addEventListener('click', () => { const v = (root.querySelector('#yt-url') as HTMLInputElement).value.trim(); if (v) opts.onYouTube(v) })
+  root.querySelector('#yt-url')?.addEventListener('keydown', (e: any) => { if (e.key === 'Enter') { e.preventDefault(); const v = (root.querySelector('#yt-url') as HTMLInputElement).value.trim(); if (v) opts.onYouTube(v) } })
+  $('b-sp')?.addEventListener('click', () => { const v = (root.querySelector('#sp-url') as HTMLInputElement).value.trim(); if (v) opts.onSpotify(v) })
+  root.querySelector('#sp-url')?.addEventListener('keydown', (e: any) => { if (e.key === 'Enter') { e.preventDefault(); const v = (root.querySelector('#sp-url') as HTMLInputElement).value.trim(); if (v) opts.onSpotify(v) } })
+  $('b-sp-capture')?.addEventListener('click', opts.onSpotifyCapture)
   $('b-prev')?.addEventListener('click', () => opts.onMode(-1))
   $('b-next')?.addEventListener('click', () => opts.onMode(1))
   $('b-rand')?.addEventListener('click', opts.onRandom)

@@ -205,14 +205,58 @@ export class AudioEngine {
   useMediaElement(src: string, label: string, opts?: { loop?: boolean; autoplay?: boolean; volume?: number; kind?: any }) {
     this.ensureContext(); this.disconnect(); this.resume()
     const el = new Audio(); el.crossOrigin = 'anonymous'; el.loop = !!opts?.loop; el.autoplay = !!opts?.autoplay; if (opts?.volume !== undefined) el.volume = opts.volume; el.src = src
-    this.mediaEl = el; this.sourceNode = this.ctx!.createMediaElementSource(el); this.sourceNode.connect(this.gainTrim!); this.sourceNode.connect(this.ctx!.destination)
+    this.mediaEl = el
+    try {
+      this.sourceNode = this.ctx!.createMediaElementSource(el); this.sourceNode.connect(this.gainTrim!); this.sourceNode.connect(this.ctx!.destination)
+    } catch (e: any) {
+      // CORS taint — fallback to synthetic rave but keep element for audible fallback
+      console.warn('createMediaElementSource CORS fail', e)
+      this.onStatusCb('error', 'Audio CORS blocked — using synthesized rave (visuals still reactive). Try File/System for real audio.')
+      try { el.src = src; el.play().catch(() => {}) } catch {}
+      // still fabricate metrics via synth, but also try to keep analyser partially fed via element->destination if allowed
+      this.sourceLabel = label + ' (CORS fallback)'; this.captureKind = (opts?.kind || 'file') as any; this.resetAdaptive(); this.setSynthetic(true); this.synth.bpm = 140; this.lastSoundAt = performance.now(); this.onStatusCb('connected', this.sourceLabel); return el
+    }
     this.sourceLabel = label; this.captureKind = opts?.kind || 'file'; this.resetAdaptive()
     const p = el.play(); if (p && (p as any).catch) (p as any).catch((e: any) => this.onStatusCb('error', 'Tap Play to start audio (' + (e?.message || 'autoplay blocked') + ')'))
-    this.lastSoundAt = performance.now(); this.onStatusCb('connected', this.sourceLabel); el.addEventListener('error', () => this.onStatusCb('error', 'Audio load failed — CORS or network. Try another track.')); return el
+    this.lastSoundAt = performance.now(); this.onStatusCb('connected', this.sourceLabel)
+    el.addEventListener('error', () => { this.onStatusCb('error', 'Audio load failed — CORS or network. Switched to synth.'); this.setSynthetic(true) }); return el
+  }
+  // Guaranteed CORS-free rave: WebAudio oscillators directly feeding analyser + destination
+  useSynthRave(bpm = 140) {
+    this.ensureContext(); this.disconnect(); this.resume(); this.resetAdaptive()
+    this.synth.bpm = bpm; this.setSynthetic(false)
+    // Build a simple rave: kick (50Hz) + bass + hats via periodic scheduling
+    const ctx = this.ctx!
+    const master = ctx.createGain(); master.gain.value = 0.42; master.connect(this.gainTrim!); master.connect(ctx.destination)
+    let phase = 0
+    const schedule = () => {
+      const now = ctx.currentTime
+      // kick every beat
+      const kick = ctx.createOscillator(); kick.frequency.value = 55; const kg = ctx.createGain(); kick.connect(kg); kg.connect(master); kg.gain.setValueAtTime(1, now); kg.gain.exponentialRampToValueAtTime(0.01, now + 0.18); kick.start(now); kick.stop(now + 0.2)
+      // bass
+      const bass = ctx.createOscillator(); bass.type = 'sawtooth'; bass.frequency.value = 110 + Math.sin(phase) * 8; const bg = ctx.createGain(); bass.connect(bg); bg.connect(master); bg.gain.setValueAtTime(0.18, now); bg.gain.linearRampToValueAtTime(0.02, now + 0.22); bass.start(now); bass.stop(now + 0.23)
+      // hats
+      if (Math.random() < 0.7) { const h = ctx.createOscillator(); h.frequency.value = 8000; const hg = ctx.createGain(); h.connect(hg); hg.connect(master); hg.gain.setValueAtTime(0.08, now + 0.05); hg.gain.exponentialRampToValueAtTime(0.001, now + 0.09); h.start(now + 0.05); h.stop(now + 0.1) }
+      phase += 0.22; setTimeout(schedule, 60000 / bpm)
+    }
+    schedule()
+    // Keep a dummy mediaEl for label consistency
+    this.mediaEl = new Audio(); this.sourceLabel = `synth-rave ${bpm} BPM`; this.captureKind = 'demo' as any; this.lastSoundAt = performance.now(); this.onStatusCb('connected', this.sourceLabel); return this.mediaEl
   }
   useDemo(idx?: number) {
     if (typeof idx === 'number') this.demoIdx = ((idx % DEMO_TRACKS.length) + DEMO_TRACKS.length) % DEMO_TRACKS.length
-    const track = DEMO_TRACKS[this.demoIdx]; const el = this.useMediaElement(track.url, 'demo: ' + track.title + ' — ' + track.artist, { loop: true, kind: 'demo' as any }); this.synth.bpm = track.bpm; this.setSynthetic(false); if (this.gainTrim) this.gainTrim.gain.value = 1.1; return el
+    const track = DEMO_TRACKS[this.demoIdx]
+    // Try real MP3 first, but if it errors quickly we will fallback to synth rave in main.ts error handler.
+    // To guarantee sound even when offline/CORS, also ensure synth is disabled initially.
+    try {
+      const el = this.useMediaElement(track.url, 'demo: ' + track.title + ' — ' + track.artist, { loop: true, kind: 'demo' as any })
+      this.synth.bpm = track.bpm; this.setSynthetic(false); if (this.gainTrim) this.gainTrim.gain.value = 1.1
+      // If createMediaElementSource failed, useMediaElement already fell back to synth; detect and switch to true synth rave
+      if (this.sourceLabel.includes('CORS fallback')) { this.useSynthRave(track.bpm) }
+      return el
+    } catch {
+      return this.useSynthRave(DEMO_TRACKS[this.demoIdx].bpm)
+    }
   }
   nextDemo() { this.demoIdx = (this.demoIdx + 1) % DEMO_TRACKS.length; return this.useDemo(this.demoIdx) }
   async useYouTube(youtubeUrl: string) {
