@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>MusicFluid — Audio Reactive Visualizer</title>
+    <meta name="description" content="Audio-reactive WebGL fluid, fractal and canvas visualizer with Spotify playback control.">
+    <!-- Added to the Home Screen, this runs chrome-free and truly fullscreen. -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="MusicFluid">
+    <meta name="theme-color" content="#0e0e14">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <canvas id="fluid-canvas" class="stage"></canvas>
+    <canvas id="fractal-canvas" class="stage inactive"></canvas>
+    <canvas id="viz2d" class="stage inactive"></canvas>
+    <canvas id="geometry-canvas" class="stage inactive"></canvas>
+
+    <!-- Slide-out control panel ------------------------------------------- -->
+    <button id="panel-toggle" title="Show / hide controls (H)" aria-label="Toggle control panel">&#8249;</button>
+
+    <aside id="panel">
+        <div class="panel-header">
+            <span class="panel-title">MusicFluid</span>
+            <span class="panel-hint">H&nbsp;·&nbsp;hide &nbsp; F&nbsp;·&nbsp;full &nbsp; &rarr;&nbsp;·&nbsp;next</span>
+        </div>
+
+        <!-- ------------------------- Audio source ------------------------ -->
+        <section class="section" data-section="source">
+            <div class="section-head"><span class="chevron">&#9660;</span>Audio Source</div>
+            <div class="section-body">
+                <div class="btn-grid three">
+                    <button id="btn-sys" class="primary" title="Capture what your computer is playing">System</button>
+                    <button id="btn-mic" title="Capture your microphone">Mic</button>
+                    <button id="btn-file" title="Play a local audio file">File</button>
+                </div>
+                <input type="file" id="file-input" accept="audio/*" hidden>
+                <!-- Next-Gen: Zero-friction instant rave demos + YouTube -->
+                <div class="control-group" style="margin-top:8px;">
+                    <label>Instant Demo — high-energy rave (no login) <span id="demo-label" class="hint-inline">140 BPM</span></label>
+                    <div class="btn-grid three">
+                        <button id="btn-demo" class="primary" title="Play built-in rave demo (CORS analyser)" style="background: linear-gradient(90deg,#ff005c,#ff8c00); border-color:#ff6d00; color:#fff;">▶ Demo Rave</button>
+                        <button id="btn-demo-next" title="Next demo track">Next</button>
+                        <button id="btn-demo-stop" title="Stop demo">■ Stop</button>
+                    </div>
+                    <div class="note" style="font-size:0.78em; margin-top:4px;">
+                        <strong>Zero friction:</strong> pre-loaded with electronic/rave (140 BPM default). Drives analyser directly — no picker, no Spotify. Try this first.
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>Or paste YouTube / audio URL <span class="hint-inline">BETA</span></label>
+                    <div class="copy-field">
+                        <input type="text" id="yt-url" placeholder="https://youtube.com/watch?v=…  or  https://…/track.mp3" spellcheck="false" autocomplete="off">
+                        <button id="btn-yt-load">Play</button>
+                    </div>
+                    <p class="note" style="font-size:0.78em;">YouTube links resolved via server if <code>YT_API_KEY</code> is set; direct MP3s play anywhere. YouTube embed playback uses tab capture — click <em>System → share tab audio</em> if it shows silent.</p>
+                </div>
+                <div class="btn-grid" style="margin-top:6px;">
+                    <button id="btn-src-embed" class="spotify"
+                            title="Play in this tab and capture it — no daemon needed">Spotify Player</button>
+                    <button id="btn-spotify"
+                            title="Connect the Soloist daemon and capture its output">Spotify Soloist</button>
+                </div>
+                <p class="note" style="font-size:0.8em;">
+                    <strong>Spotify Player</strong> plays in <em>this tab</em>, so tab-audio capture
+                    reaches the analyser directly — the reliable path, and it needs no daemon.
+                    <strong>Soloist</strong> plays on the daemon's own output, so it needs system
+                    capture of whatever speaker that lands on (mic on phones). Either way the
+                    browser asks for capture permission once, then reuses it.
+                </p>
+
+                <p class="note ios-only">
+                    <strong>On iPhone / iPad:</strong> iOS gives no browser access to system
+                    audio, so <strong>Mic</strong> is the way in. Start the music in the Spotify
+                    app (speaker, not headphones), come back here, tap <strong>Mic</strong>, and
+                    the visuals follow the room. Raise <em>Master gain</em> if it reads quiet.
+                </p>
+
+                <div class="status" id="source-status">
+                    <span class="dot"></span><span id="source-status-text">No audio source connected</span>
+                </div>
+
+                <div class="toggle-row">
+                    <span>Auto-level <span id="val-autogain" class="hint-inline"></span></span>
+                    <button class="switch" id="sw-autolevel" role="switch" aria-checked="false" aria-label="Auto level"></button>
+                </div>
+                <div class="toggle-row">
+                    <span>Simulated beat when silent</span>
+                    <button class="switch on" id="sw-synthetic" role="switch" aria-checked="true" aria-label="Simulated beat"></button>
+                </div>
+
+                <div id="meters">
+                    <div class="meter"><div class="bar"><i data-band="subBass"></i></div><span>Sub</span></div>
+                    <div class="meter"><div class="bar"><i data-band="bass"></i></div><span>Bass</span></div>
+                    <div class="meter"><div class="bar"><i data-band="lowMid"></i></div><span>Low</span></div>
+                    <div class="meter"><div class="bar"><i data-band="mid"></i></div><span>Mid</span></div>
+                    <div class="meter"><div class="bar"><i data-band="highMid"></i></div><span>Hi</span></div>
+                    <div class="meter"><div class="bar"><i data-band="presence"></i></div><span>Pres</span></div>
+                    <div class="meter"><div class="bar"><i data-band="air"></i></div><span>Air</span></div>
+                </div>
+                <div class="note" id="bpm-readout">Tempo &mdash;</div>
+            </div>
+        </section>
+
+        <!-- ------------------------ Spotify Player ----------------------- -->
+        <section class="section" data-section="player">
+            <div class="section-head spotify-head"><span class="chevron">&#9660;</span>Spotify Player</div>
+            <div class="section-body">
+                <iframe id="sp-embed" style="border-radius:12px" src="about:blank"
+                        width="100%" height="352" frameBorder="0" loading="lazy"
+                        title="Spotify player"
+                        allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+                        allowfullscreen></iframe>
+                <div class="copy-field" style="margin-top:8px;">
+                    <input type="text" id="sp-embed-url" placeholder="Paste any Spotify playlist / album / track link" spellcheck="false" autocomplete="off">
+                    <button id="btn-embed-load">Load</button>
+                </div>
+                <button id="btn-embed-capture" class="spotify" style="width:100%; margin-top:8px;"
+                        title="Capture this tab so the visualizer hears the player">Listen to this player</button>
+                <p class="note" style="font-size:0.8em;">
+                    Independent of Soloist — nothing here needs the daemon.
+                    <strong>Listen to this player</strong> asks once for permission to capture this
+                    tab (browsers give no way to tap a Spotify frame's audio without it, and the
+                    stream is DRM-protected). This tab is preselected — confirm it and tick
+                    <strong>“Share tab audio”</strong>. After that it is reused, with no further
+                    prompts; <strong>System</strong> re-opens the picker if you pick the wrong thing.
+                    Full tracks need a Premium session on <code>open.spotify.com</code> in this
+                    browser; otherwise it previews 30&nbsp;s.
+                    <button id="btn-embed-reset" class="linkish">reset to default</button>
+                </p>
+            </div>
+        </section>
+
+        <!-- --------------------------- Spotify Soloist --------------------------- -->
+        <section class="section" data-section="spotify">
+            <div class="section-head spotify-head"><span class="chevron">&#9660;</span>Spotify Soloist</div>
+            <div class="section-body">
+
+                <div id="sp-setup">
+                    <div class="control-group">
+                        <label>Soloist API key</label>
+                        <div class="copy-field">
+                            <input type="password" id="sp-soloist-key" placeholder="Soloist API key" spellcheck="false" autocomplete="off">
+                            <button id="btn-save-soloist">Save</button>
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <label>Soloist WebSocket</label>
+                        <div class="copy-field">
+                            <input type="text" id="sp-ws-url" placeholder="127.0.0.1:9090 or wss://host/soloist/ws" spellcheck="false" autocomplete="off">
+                            <button id="btn-save-ws">Save</button>
+                        </div>
+                    </div>
+                    <div class="btn-grid">
+                        <button id="btn-soloist-connect" class="spotify">Connect &amp; open dashboard</button>
+                        <button id="btn-soloist-status" title="Open /soloist/status">Status</button>
+                    </div>
+                    <p class="note" id="sp-ws-hint" style="font-size:0.8em;"></p>
+
+                    <details class="sp-docs">
+                        <summary>Setup &amp; daemon notes</summary>
+                        <p class="note">
+                            Powered by <a href="https://developer.spotify.com/documentation/soloist" target="_blank" rel="noopener">Spotify Soloist</a> — a headless daemon that appears as a Connect device.
+                            Generate a key at <a href="https://developer.spotify.com/dashboard/soloist" target="_blank" rel="noopener">dashboard/soloist</a> (Premium required). The daemon uses it at startup; the browser never sends it to Spotify.
+                        </p>
+                        <p class="note">
+                            <strong>Railway:</strong> set <code>SOLOIST_API_KEY</code> and optionally <code>SOLOIST_DEVICE_NAME</code> in <strong>Railway → Variables</strong>. The server downloads the
+                            <a href="https://developer.spotify.com/documentation/soloist/reference/downloads-and-updates" target="_blank" rel="noopener">binary</a>, runs it with <code>--ws 127.0.0.1:9090</code> and proxies it at <code>wss://&lt;host&gt;/soloist/ws</code>.
+                            Builds expire after 90&nbsp;days (exit&nbsp;10). <a href="/soloist/status" target="_blank" rel="noopener">/soloist/status</a> shows health.
+                        </p>
+                        <p class="note">
+                            <strong>Local Linux / Raspberry Pi:</strong><br>
+                            <code>curl -L -o soloist.tar.gz https://soloist-builds.spotifycdn.com/soloist_release_arm64.tar.gz<br>tar -xzf soloist.tar.gz &amp;&amp; sudo install -m 755 soloist /usr/local/bin/soloist<br>soloist --device-name "MusicFluid" --api-key "$SOLOIST_API_KEY" --ws 127.0.0.1:9090</code><br>
+                            Then pair once: Spotify app → Connect → <em>MusicFluid</em>.
+                        </p>
+                    </details>
+                </div>
+
+                <div id="sp-session" hidden>
+                    <div class="status" id="sp-status">
+                        <span class="dot live"></span><span id="sp-status-text">Connected</span>
+                    </div>
+
+                    <div id="spotify-now">
+                        <img id="np-art" alt="" crossorigin="anonymous">
+                        <div class="np-meta">
+                            <div id="np-title">Nothing playing</div>
+                            <div id="np-artist"></div>
+                            <div id="np-progress"><div id="np-progress-fill"></div></div>
+                        </div>
+                    </div>
+
+                    <div class="transport">
+                        <button id="btn-prev" title="Previous">&#9198;</button>
+                        <button id="btn-play" title="Play / pause">&#9654;</button>
+                        <button id="btn-next" title="Next">&#9197;</button>
+                    </div>
+
+                    <div class="btn-grid">
+                        <button id="btn-sp-connect" class="spotify">Activate Soloist</button>
+                        <button id="btn-open-dashboard" title="Full Soloist dashboard in its own window">Dashboard &#8599;</button>
+                    </div>
+
+                    <div class="toggle-row">
+                        <span>Tint visuals from album art</span>
+                        <button class="switch on" id="sw-albumcolor" role="switch" aria-checked="true" aria-label="Album art colours"></button>
+                    </div>
+
+                    <button id="btn-sp-logout" style="margin-top:4px;">Disconnect</button>
+                </div>
+
+                <p class="note no-ios" id="sp-drm-note" hidden>
+                    Soloist decrypts locally but audio stays on the daemon’s output (HDMI/DAC/Bluetooth). Hit <strong>System</strong> above and tick
+                    <strong>“Share system audio”</strong> in the browser picker to feed the visualizer’s analyser — or let the simulated beat run.
+                </p>
+                <p class="note ios-only">
+                    These controls drive the Soloist Connect device over its WebSocket. Play from the Spotify app by selecting the Soloist device, or use the transport here.
+                </p>
+            </div>
+        </section>
+
+        <!-- -------------------------- Visualizer -------------------------- -->
+        <section class="section" data-section="visual">
+            <div class="section-head"><span class="chevron">&#9660;</span>Visualizer</div>
+            <div class="section-body">
+                <div class="control-group">
+                    <label>Mode <span id="mode-count"></span></label>
+                    <select id="select-mode"></select>
+                </div>
+                <div class="btn-grid three">
+                    <button id="btn-prev-mode" title="Previous mode">&#8249; Prev</button>
+                    <button id="btn-random-mode" title="Random mode (R)">Random</button>
+                    <button id="btn-next-mode" title="Next mode">Next &#8250;</button>
+                </div>
+                <button id="btn-vr" hidden style="width:100%; margin-top:8px;"
+                        title="View the visualizer in a VR headset (WebXR)">Enter VR</button>
+
+                <div class="toggle-row">
+                    <span>Auto-cycle modes</span>
+                    <button class="switch" id="sw-cycle" role="switch" aria-checked="false" aria-label="Auto cycle"></button>
+                </div>
+                <div class="control-group">
+                    <label>Cycle every <span id="val-cycle">30s</span></label>
+                    <input type="range" id="slider-cycle" min="5" max="180" step="5" value="30">
+                </div>
+
+                <div class="control-group">
+                    <label>Colour palette</label>
+                    <select id="select-palette">
+                        <option value="rainbow">Rainbow Cycle</option>
+                        <option value="neon">Neon</option>
+                        <option value="prism">Prism</option>
+                        <option value="vapor">Vaporwave</option>
+                        <option value="aurora">Aurora</option>
+                        <option value="sunset">Sunset</option>
+                        <option value="dusk">Dusk</option>
+                        <option value="ice">Ice</option>
+                        <option value="oceanic">Oceanic</option>
+                        <option value="magma">Magma</option>
+                        <option value="ember">Ember</option>
+                        <option value="infrared">Infrared</option>
+                        <option value="forest">Forest</option>
+                        <option value="toxic">Toxic</option>
+                        <option value="royal">Royal</option>
+                        <option value="candy">Candy</option>
+                        <option value="gold">Gold</option>
+                        <option value="mono">Monochrome</option>
+                        <option value="album">Album Art</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label>Colour drift <span id="val-colspeed">1.0</span></label>
+                    <input type="range" id="slider-colspeed" min="0" max="4" step="0.1" value="1">
+                </div>
+                <div class="control-group">
+                    <label>Musical colour <span id="val-chroma">0%</span></label>
+                    <input type="range" id="slider-chroma" min="0" max="100" step="5" value="0">
+                </div>
+                <p class="note">Musical colour hands the hue over to the track's dominant pitch
+                   class, so the palette moves with the harmony rather than the clock.</p>
+            </div>
+        </section>
+
+        <!-- ----------------------- Spectrum layers ------------------------ -->
+        <section class="section" data-section="layers">
+            <div class="section-head"><span class="chevron">&#9660;</span>Spectrum Layers</div>
+            <div class="section-body">
+                <p class="note">Each mode's signature motion sits on one band; these layers add
+                   the rest of the spectrum around it. Toggle with keys <strong>1&ndash;4</strong>.</p>
+                <div class="btn-grid four">
+                    <button id="layer-sub" title="Sub-bass swell (1)">Sub</button>
+                    <button id="layer-mid" title="Mid orbiters + pitch petals (2)">Mid</button>
+                    <button id="layer-high" title="Upper-mid filaments + fractal dust (3)">High</button>
+                    <button id="layer-air" title="Air sparkle (4)">Air</button>
+                </div>
+                <div class="control-group">
+                    <label>Layer depth <span id="val-depth">100%</span></label>
+                    <input type="range" id="slider-depth" min="0" max="200" step="5" value="100">
+                </div>
+                <div class="control-group">
+                    <label>Adaptive range <span id="val-adaptive">100%</span></label>
+                    <input type="range" id="slider-adaptive" min="0" max="100" step="5" value="100">
+                </div>
+                <p class="note">Adaptive range gives every band its own rolling floor and ceiling,
+                   so quiet parts of the spectrum stay expressive instead of sitting at zero.
+                   Drop it toward 0% for raw, unequalised levels.</p>
+                <div class="control-group">
+                    <label>Attack <span id="val-attack">55%</span></label>
+                    <input type="range" id="slider-attack" min="5" max="100" step="5" value="55">
+                </div>
+                <div class="control-group">
+                    <label>Release <span id="val-release">8%</span></label>
+                    <input type="range" id="slider-release" min="1" max="50" step="1" value="8">
+                </div>
+            </div>
+        </section>
+
+        <!-- ------------------------- Reactivity -------------------------- -->
+        <section class="section" data-section="react">
+            <div class="section-head"><span class="chevron">&#9660;</span>Audio Reactivity</div>
+            <div class="section-body">
+                <div class="control-group">
+                    <label>Master gain <span id="val-gain">1.2</span></label>
+                    <input type="range" id="slider-gain" min="0.2" max="4.0" step="0.1" value="1.2">
+                </div>
+                <div class="control-group">
+                    <label>Beat threshold <span id="val-sens">1.50</span></label>
+                    <input type="range" id="slider-sens" min="1.0" max="3.0" step="0.05" value="1.5">
+                </div>
+                <div class="control-group">
+                    <label>Motion speed <span id="val-motion">0.55&times;</span></label>
+                    <input type="range" id="slider-motion" min="0.15" max="2.0" step="0.05" value="0.55">
+                </div>
+                <div class="control-group">
+                    <label>Reaction strength <span id="val-react">1.0</span></label>
+                    <input type="range" id="slider-react" min="0.2" max="2.5" step="0.1" value="1.0">
+                </div>
+                <div class="control-group">
+                    <label>Spectrum smoothing <span id="val-smooth">0.82</span></label>
+                    <input type="range" id="slider-smooth" min="0.3" max="0.96" step="0.01" value="0.82">
+                </div>
+            </div>
+        </section>
+
+        <!-- ------------------------- Interaction -------------------------- -->
+        <section class="section" data-section="interact">
+            <div class="section-head"><span class="chevron">&#9660;</span>Interaction</div>
+            <div class="section-body">
+                <div class="control-group">
+                    <label>Pointer influence <span id="val-interact">100%</span></label>
+                    <input type="range" id="slider-interact" min="0" max="200" step="5" value="100">
+                </div>
+                <p class="note no-ios">
+                    Every mode responds to the pointer. <strong>Move</strong> to paint or bend the
+                    field, <strong>hold</strong> to pull it toward you, <strong>shift-hold</strong>
+                    or right-hold to push it away.
+                </p>
+                <p class="note ios-only">
+                    Every mode responds to touch. <strong>Drag</strong> to paint or bend the field,
+                    <strong>hold</strong> to pull it in, <strong>two fingers</strong> to push away.
+                </p>
+            </div>
+        </section>
+
+        <!-- ------------------------ Fluid physics ------------------------ -->
+        <section class="section" data-section="physics">
+            <div class="section-head"><span class="chevron">&#9660;</span>Fluid Physics</div>
+            <div class="section-body" data-engine-only="fluid">
+                <div class="control-group">
+                    <label>Dissipation <span id="val-diss">0.980</span></label>
+                    <input type="range" id="slider-diss" min="0.900" max="0.999" step="0.001" value="0.980">
+                </div>
+                <div class="control-group">
+                    <label>Vorticity <span id="val-vort">30</span></label>
+                    <input type="range" id="slider-vort" min="0" max="60" step="1" value="30">
+                </div>
+                <div class="control-group">
+                    <label>Viscosity <span id="val-visc">0.30</span></label>
+                    <input type="range" id="slider-visc" min="0.0" max="1.0" step="0.05" value="0.30">
+                </div>
+                <div class="control-group">
+                    <label>Splat radius <span id="val-radius">0.25</span></label>
+                    <input type="range" id="slider-radius" min="0.05" max="0.6" step="0.01" value="0.25">
+                </div>
+                <div class="control-group">
+                    <label>Exposure <span id="val-bloom">1.0</span></label>
+                    <input type="range" id="slider-bloom" min="0.3" max="3.0" step="0.1" value="1.0">
+                </div>
+                <div class="control-group">
+                    <label>Fractal fold <span id="val-fold">auto</span></label>
+                    <input type="range" id="slider-fold" min="-5" max="100" step="5" value="-5">
+                </div>
+                <p class="note">Fractal fold mirrors and rescales the dye field over and over, so
+                   the fluid picks up self-similar detail that keeps resolving as it moves.
+                   <em>auto</em> uses each mode's own setting.</p>
+                <button id="btn-clear">Clear canvas</button>
+            </div>
+        </section>
+
+        <!-- --------------------------- Fractal ---------------------------- -->
+        <section class="section" data-section="fractal">
+            <div class="section-head"><span class="chevron">&#9660;</span>Fractal Engine</div>
+            <div class="section-body" data-engine-only="fractal">
+                <div class="control-group">
+                    <label>Detail <span id="val-detail">60%</span></label>
+                    <input type="range" id="slider-detail" min="10" max="100" step="5" value="60">
+                </div>
+                <div class="control-group">
+                    <label>Zoom <span id="val-zoom">1.00×</span></label>
+                    <input type="range" id="slider-zoom" min="-100" max="600" step="1" value="0">
+                </div>
+                <button class="btn" id="btn-reset-view">Reset view</button>
+                <!-- Next-Gen: morph + fly-through -->
+                <div class="control-group">
+                    <label>Fractal morph <span id="val-morph">0%</span></label>
+                    <input type="range" id="slider-morph" min="0" max="100" step="1" value="0">
+                </div>
+                <div class="control-group">
+                    <label>Morph auto-rate <span id="val-morph-rate">0%</span></label>
+                    <input type="range" id="slider-morph-rate" min="0" max="100" step="5" value="0">
+                </div>
+                <div class="toggle-row">
+                    <span>Fly-through mode</span>
+                    <button class="switch" id="sw-fly" role="switch" aria-checked="false" aria-label="Fly-through"></button>
+                </div>
+                <div class="control-group">
+                    <label>Flight speed <span id="val-fly">1.0×</span></label>
+                    <input type="range" id="slider-fly" min="0.2" max="3.0" step="0.1" value="1.0">
+                </div>
+                <div class="control-group">
+                    <label>Background</label>
+                    <select id="select-bg"></select>
+                </div>
+                <div class="control-group">
+                    <label>Background amount <span id="val-bg-amt">100%</span></label>
+                    <input type="range" id="slider-bg-amt" min="0" max="200" step="5" value="100">
+                </div>
+                <div class="toggle-row">
+                    <span>Frequency key</span>
+                    <button class="switch" id="sw-freq-key" role="switch" aria-checked="false" aria-label="Frequency key"></button>
+                </div>
+                <div class="control-group">
+                    <label>Left click</label>
+                    <select id="select-click-left"></select>
+                </div>
+                <div class="control-group">
+                    <label>Right click</label>
+                    <select id="select-click-right"></select>
+                </div>
+                <div class="control-group">
+                    <label>Pointer follow</label>
+                    <select id="select-hover"></select>
+                </div>
+                <p class="note">Detail sets the iteration budget — higher means finer filigree and
+                   more GPU load. Scroll to zoom on the cursor, drag to pan, double-click to reset.
+                   The zoom slider is logarithmic and runs to a million×; past roughly 100000×
+                   the shader's 32-bit precision starts to show as blocky detail.</p>
+                <p class="note">Every scene is interactive, and the effects are shared rather
+                   than per-scene: pick one for each mouse button and one for the pointer to do as
+                   it moves. The two buttons have separate slots, so a right-click effect can land
+                   while a left-click one is still playing out. On touch, two fingers count as the
+                   right button. Overall strength is <b>Interaction</b> under Analysis; set an
+                   effect to <b>None</b> to switch it off.</p>
+                <p class="note">The seven bands each have a fixed job, in every scene:
+                   <b>sub</b> swells the frame, <b>bass</b> pushes outward, <b>low mid</b> twists,
+                   <b>mid</b> sets how many elements exist, <b>high mid</b> sharpens edges,
+                   <b>presence</b> lights rims, <b>air</b> sparkles. Colour follows the same
+                   mapping, so the hue of a thing tells you which frequency drives it. Turn on
+                   <b>Frequency key</b> for the seven-bar readout: filled bar is the fast lane,
+                   the white tick is the slow one that moves shape.</p>
+                <p class="note">On the two Julia modes, <b>shift-click</b> any filament to lock the
+                   camera onto it. The set keeps deforming, but that feature stays centred instead
+                   of drifting off screen — it is tracked by its position in the set's structure,
+                   not by pixel. Shift-click again, or Reset view, to release. The seed also brakes
+                   to a thousandth of its pace as the set breaks open, so the moment the black
+                   ground appears between the pieces plays out over minutes rather than a frame.</p>
+            </div>
+        </section>
+
+        <!-- --------------------------- Display ---------------------------- -->
+        <section class="section" data-section="display">
+            <div class="section-head"><span class="chevron">&#9660;</span>Display</div>
+            <div class="section-body">
+                <div class="btn-grid">
+                    <button id="btn-fullscreen">Fullscreen</button>
+                    <button id="btn-snapshot">Save frame</button>
+                </div>
+                <div class="toggle-row">
+                    <span>Hide panel while idle</span>
+                    <button class="switch" id="sw-autohide" role="switch" aria-checked="false" aria-label="Auto hide panel"></button>
+                </div>
+                <div class="toggle-row">
+                    <span>Show mode name on change</span>
+                    <button class="switch on" id="sw-modeflash" role="switch" aria-checked="true" aria-label="Show mode name"></button>
+                </div>
+                <div class="control-group">
+                    <label>Render scale <span id="val-quality">100%</span></label>
+                    <input type="range" id="slider-quality" min="50" max="150" step="10" value="100">
+                </div>
+                <p class="note ios-only">
+                    iPhone Safari has no fullscreen API. For an edge-to-edge, chrome-free
+                    visualizer, use <strong>Share &rarr; Add to Home Screen</strong> and launch
+                    it from the icon.
+                </p>
+                <p class="note no-ios">
+                    Keyboard: <strong>H</strong> panel · <strong>F</strong> fullscreen ·
+                    <strong>R</strong> random · <strong>C</strong> clear ·
+                    <strong>1&ndash;4</strong> layers · <strong>Space</strong> play/pause ·
+                    <strong>&larr; &rarr;</strong> change mode
+                </p>
+                <p class="note ios-only">
+                    Touch: tap the edge handle to slide the panel away, or swipe left / right
+                    anywhere on the visualizer. Swipe up / down to change mode.
+                </p>
+            </div>
+        </section>
+    </aside>
+
+    <div id="mode-flash">
+        <div class="mf-name"></div>
+        <div class="mf-group"></div>
+    </div>
+
+    <div id="toast"></div>
+
+    <div id="fallback">
+        <h2>WebGL 2.0 unavailable</h2>
+        <p>The fluid and fractal modes need WebGL&nbsp;2.0 with <code>EXT_color_buffer_float</code>.
+           Aurora Curtains will still work — pick it from the Visualizer list.</p>
+    </div>
+
+    <script src="legacy/js/palette.js"></script>
+    <script src="legacy/js/audio.js"></script>
+    <script src="legacy/js/fluid.js"></script>
+    <script src="legacy/js/fractal.js"></script>
+    <script src="legacy/js/viz2d.js"></script>
+    <script src="legacy/js/geometry.js"></script>
+    <script src="legacy/js/spotify.js"></script>
+    <script src="legacy/js/xr.js"></script>
+    <script src="legacy/js/xr-next.js"></script>
+    <script src="legacy/js/app.js"></script>
+</body>
+</html>

@@ -276,7 +276,13 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    if (pathname === '/' || pathname === '') pathname = '/index.html';
+    if (pathname === '/' || pathname === '') {
+        // Greenfield Vite: prefer built dist/index.html in production (Railway)
+        // Fallback to root index.html for legacy/dev. Keeps both paths working.
+        const distIndex = path.join(ROOT, 'dist', 'index.html');
+        if (fs.existsSync(distIndex)) pathname = '/dist/index.html';
+        else pathname = '/index.html';
+    }
 
     // Resolve inside ROOT only — blocks ../ traversal.
     const filePath = path.join(ROOT, pathname);
@@ -285,16 +291,24 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    fs.readFile(filePath, (err, data) => {
+    // Greenfield: also try dist/ for built assets (Vite)
+    let candidate = filePath;
+    const distCandidate = path.join(ROOT, 'dist', pathname.replace(/^\//, ''));
+    if (fs.existsSync(distCandidate) && fs.statSync(distCandidate).isFile()) candidate = distCandidate;
+
+    fs.readFile(candidate, (err, data) => {
         if (err) {
-            // Unknown paths fall back to the app so the SPA routing still lands.
-            fs.readFile(path.join(ROOT, 'index.html'), (e2, html) => {
-                if (e2) { res.writeHead(404).end('Not found'); return; }
-                res.writeHead(200, { 'Content-Type': MIME['.html'] }).end(html);
+            // Try dist fallback
+            fs.readFile(path.join(ROOT, 'dist', 'index.html'), (e2, html) => {
+                if (!e2) { res.writeHead(200, { 'Content-Type': MIME['.html'] }).end(html); return; }
+                fs.readFile(path.join(ROOT, 'index.html'), (e3, html2) => {
+                    if (e3) { res.writeHead(404).end('Not found'); return; }
+                    res.writeHead(200, { 'Content-Type': MIME['.html'] }).end(html2);
+                });
             });
             return;
         }
-        const ext = path.extname(filePath).toLowerCase();
+        const ext = path.extname(candidate).toLowerCase();
         const source = ext === '.html' || ext === '.js' || ext === '.css';
         res.writeHead(200, {
             'Content-Type': MIME[ext] || 'application/octet-stream',
