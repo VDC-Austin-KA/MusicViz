@@ -20,7 +20,7 @@ const vm = require('vm');
 
 const sandbox = { window: {}, console: console, Math: Math, Float32Array: Float32Array, Array: Array, Date: Date };
 vm.createContext(sandbox);
-vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'js', 'audio.js'), 'utf8'), sandbox);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'legacy', 'js', 'audio.js'), 'utf8'), sandbox);
 const norm = sandbox.window.AudioEngine._rangeNorm;
 
 function run(signal, frames, skip) {

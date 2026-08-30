@@ -49,6 +49,7 @@ export class GeometryEngine {
     else if (m.id === 'neon-tunnel') this.buildTunnel()
     else if (m.id === 'hex-pulse') this.buildHex()
     else if (m.id === 'kaleido') this.buildKaleido()
+    else if (m.id === 'cosmic-nebula') this.buildNebula()
     else if (m.id.startsWith('hybrid') || m.id === 'bloom-grid') this.buildHybrid()
     else this.buildFlower()
   }
@@ -56,6 +57,39 @@ export class GeometryEngine {
     if (!this.scene) return
     this.meshes.forEach(o => this.scene!.remove(o)); this.meshes = []
   }
+  private buildNebula() {
+    const particleCount = 2000
+    const geometry = new THREE.BufferGeometry()
+    const positions = new Float32Array(particleCount * 3)
+    const colors = new Float32Array(particleCount * 3)
+    for (let i = 0; i < particleCount; i++) {
+      const radius = 0.2 + Math.random() * 2.2
+      const theta = Math.random() * Math.PI * 2
+      const phi = (Math.random() - 0.5) * Math.PI * 0.8
+      positions[i * 3] = radius * Math.cos(theta) * Math.cos(phi)
+      positions[i * 3 + 1] = radius * Math.sin(phi)
+      positions[i * 3 + 2] = radius * Math.sin(theta) * Math.cos(phi)
+
+      const c = this.palette.sample(Math.random())
+      colors[i * 3] = c.r
+      colors[i * 3 + 1] = c.g
+      colors[i * 3 + 2] = c.b
+    }
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+
+    const material = new THREE.PointsMaterial({
+      size: 0.04,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending
+    })
+    const points = new THREE.Points(geometry, material)
+    this.scene!.add(points)
+    this.meshes.push(points)
+  }
+  // ---- builders (minimal, TSL comment shows future node)
   // ---- builders (minimal, TSL comment shows future node)
   private buildFlower() {
     const petals = new THREE.Group()
@@ -121,22 +155,38 @@ export class GeometryEngine {
     if (!this.renderer || !this.scene || !this.camera) return
     this.clock = t
     const u = metrics.band
-    // TSL idea: uniform nodes for bass/mid/treble drive vertex offsets; here JS lerp
     const bass = u.bass?.norm || 0, mid = u.mid?.norm || 0, air = u.air?.onset || 0
+
+    // Zoom & Pan camera positioning
+    const zoom = Math.max(0.1, ctx.zoom || 1)
+    const panX = (ctx.pan?.x || 0) * 3
+    const panY = (ctx.pan?.y || 0) * 3
+    let flyDrift = 0
+    if (ctx.flyThrough) {
+      flyDrift = Math.sin(t * 0.0005 * (ctx.flySpeed || 1)) * 0.8
+    }
+    this.camera.position.set(panX + flyDrift, panY, (3.2 / zoom) + Math.sin(t * 0.0002) * 0.3)
+    this.camera.lookAt(panX, panY, 0)
+
     const id = this.mode?.id
     if (id === 'flower') {
       const g: any = this.meshes[0]; if (g) { g.rotation.z += 0.00035 + mid * 0.0012; g.scale.setScalar(0.9 + bass * 0.55 + metrics.beatPulse * 0.12) }
-      // air sparkle via emissive
       this.scene.background = new THREE.Color().setHSL((performance.now() * 0.00003) % 1, 0.85, 0.06 + air * 0.04)
     } else if (id === 'orbit-rings') {
       this.meshes[0]?.children.forEach((c: any, i: number) => { c.rotation.z += 0.00012 * (1 + i * 0.2) + mid * 0.001; c.scale.setScalar(1 + metrics.bandsNorm[i * 4] * 0.12) })
     } else if (id === 'neon-tunnel') {
       this.meshes[0]?.children.forEach((c: any, i: number) => { c.position.z += 0.002 + bass * 0.006; if (c.position.z > 1) c.position.z = -3.5 })
-      this.camera!.position.z = 3.2 + Math.sin(t * 0.0002) * 0.3
     } else if (id === 'hex-pulse') {
       this.meshes[0]?.children.forEach((c: any, i: number) => { const v = metrics.bandsNorm[i % 64]; c.scale.setScalar(0.6 + v * 0.9); c.rotation.y += 0.005 + v * 0.02 })
     } else if (id === 'kaleido') {
       this.meshes[0]?.rotation.set(0, 0, t * 0.00012)
+    } else if (id === 'cosmic-nebula') {
+      if (this.meshes[0]) {
+        this.meshes[0].rotation.y += 0.001 + mid * 0.003
+        this.meshes[0].rotation.z += 0.0005 + bass * 0.002
+        const s = 1.0 + bass * 0.35 + metrics.beatPulse * 0.15
+        this.meshes[0].scale.set(s, s, s)
+      }
     }
     // hybrid fluid seeding hook
     if (id?.startsWith('hybrid') || id === 'bloom-grid') {
@@ -155,6 +205,7 @@ export const GeometryModes: Mode[] = [
   { id: 'neon-tunnel', name: 'Neon Tunnel', group: 'Geometry · Minimal' },
   { id: 'hex-pulse', name: 'Hex Pulse', group: 'Geometry · Lattice' },
   { id: 'kaleido', name: 'Kaleidoscope', group: 'Geometry · Symmetry' },
+  { id: 'cosmic-nebula', name: 'Cosmic Dust Nebula', group: 'Particle · 3D Vortex' },
   { id: 'bloom-grid', name: 'Bloom Grid (Hybrid)', group: 'Hybrid · Fluid-Geometry' },
   { id: 'hybrid-mandala', name: 'Fractal Mandala (Hybrid)', group: 'Hybrid · Fractal-Geometry' },
 ]

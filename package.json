@@ -1,6 +1,7 @@
 {
   "name": "musicviz",
   "version": "3.0.0",
+  "type": "module",
   "private": true,
   "description": "MusicViz — next-gen immersive music-reactive platform. Vite + TypeScript + Three/WebGPU + WebXR 6DOF",
   "scripts": {

@@ -61,11 +61,43 @@ vec3 scene(vec2 uv){
 }`,
   // Minimal stubs for rest; full port can lazy-import WGSL files
   mandala: `vec3 scene(vec2 uv){ vec2 p=uv*1.6; float petals=6.0+floor(uBand[3]*5.0)*2.0; p=rot(uBand[2]*1.4)*p; float r=length(p); vec3 col=vec3(0.0); for(int i=0;i<7;i++){ float fi=float(i); float rr=0.15+fi*0.125+uFlux[i]*0.055; float w=mix(0.020,0.005,uFlux[4])+0.022*uFlux[i]; float ring=w/(abs(r-rr)+w); ring*=ring; col+=pal(fi/7.0*0.85+uTime*0.012)*ring*0.6; } return deepen(col,1.7)*vig(0.85); }`,
+  plasma: `vec3 scene(vec2 uv){
+    vec2 p = uv * 2.5;
+    float t = uTime * 0.4 + uEnergy * 0.5;
+    for (int i = 1; i < 5; i++) {
+      float fi = float(i);
+      p += vec2(sin(fi * p.y + t + uBand[1] * 2.0), cos(fi * p.x + t + uBand[3] * 2.0)) * 0.45;
+    }
+    float v = sin(p.x + t) + cos(p.y + t) + uBand[0] * 1.5;
+    vec3 col = pal(v * 0.15 + uTime * 0.01) * (0.8 + uBeat * 0.4);
+    col += vec3(0.1, 0.4, 0.9) * exp(-abs(v) * 2.0) * (0.5 + uBand[5]);
+    return col * vig(0.9);
+  }`,
+  sacred: `vec3 scene(vec2 uv){
+    vec2 p = uv * 2.0;
+    float r = length(p);
+    float a = atan(p.y, p.x);
+    float sym = 6.0 + floor(uBand[2] * 6.0);
+    a = mod(a, TAU / sym) - PI / sym;
+    vec2 pSym = vec2(cos(a), sin(a)) * r;
+    vec3 col = vec3(0.0);
+    for (int i = 0; i < 6; i++) {
+      float fi = float(i);
+      float circleDist = abs(length(pSym - vec2(0.3 + fi * 0.12, 0.0)) - 0.25);
+      float line = smoothstep(0.02, 0.005, circleDist);
+      col += pal(fi / 6.0 + uTime * 0.01) * line * (0.6 + uBand[i] * 0.8);
+    }
+    return col * (0.8 + uEnergy * 0.6) * vig(0.85);
+  }`,
 }
 
 const MAIN_SUFFIX = `
 void main(){
   vec2 uv = (gl_FragCoord.xy / uRes - 0.5) * vec2(uRes.x/uRes.y, 1.0);
+  uv = (uv - uPan) / max(0.001, uZoom);
+  if (uFly > 0.5) {
+    uv += vec2(sin(uTime * 0.4) * 0.2, cos(uTime * 0.35) * 0.2);
+  }
   gSuv = uv;
   vec3 col = scene(uv);
   // tone

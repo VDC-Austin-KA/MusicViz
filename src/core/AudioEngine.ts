@@ -1,7 +1,10 @@
 /**
- * AudioEngine — next-gen TS port, greenfield Vite + Three
- * Preserves MusicFluid's proven adaptive rangeNorm (floor/ceil MIN_SPAN guard)
- * Adds: DEMO rave zero-friction, YouTube proxy, getUniforms() for TSL shaders
+ * AudioEngine — high-performance adaptive music streaming & audio reactive analysis engine.
+ * Features:
+ * - Dynamic range normalization & adaptive range scaling for full dynamic span [0, 1] without flatlining or crushing.
+ * - Multi-band perceptual split (subBass, bass, lowMid, mid, highMid, presence, air) + 64-bin log-spaced FFT.
+ * - 0-friction Demo Rave streaming with WebAudio oscillator synth fallback for CORS resilience.
+ * - Dynamic AGC (Auto Gain Control), beat detection, chroma pitch extraction, spectral centroid & flux analysis.
  */
 
 export type BandKey = 'subBass' | 'bass' | 'lowMid' | 'mid' | 'highMid' | 'presence' | 'air'
@@ -59,7 +62,7 @@ const TARGET_LEVEL = 0.34, GAIN_MIN = 0.15, GAIN_MAX = 12
 
 function clamp01(v: number) { return v < 0 ? 0 : v > 1 ? 1 : v }
 
-function rangeNorm(r: { floor: number; ceil: number }, v: number): number {
+export function rangeNorm(r: { floor: number; ceil: number }, v: number): number {
   r.ceil += (v > r.ceil ? CEIL_ATTACK : CEIL_RELEASE) * (v - r.ceil)
   r.floor += (v < r.floor ? FLOOR_ATTACK : FLOOR_RELEASE) * (v - r.floor)
   if (r.ceil < GATE) return 0
@@ -69,6 +72,7 @@ function rangeNorm(r: { floor: number; ceil: number }, v: number): number {
 }
 
 export class AudioEngine {
+  static _rangeNorm = rangeNorm
   BAND_COUNT = BAND_COUNT; WAVE_COUNT = WAVE_COUNT
 
   private ctx: AudioContext | null = null
@@ -91,7 +95,6 @@ export class AudioEngine {
   private bands: Record<BandKey, Band>
   metrics: Metrics
 
-  // per-bin adaptive
   private bandEdges: Int32Array | null = null
   private bandDefBins: [number, number][] | null = null
   private chromaMap: Int8Array | null = null
@@ -209,49 +212,40 @@ export class AudioEngine {
     try {
       this.sourceNode = this.ctx!.createMediaElementSource(el); this.sourceNode.connect(this.gainTrim!); this.sourceNode.connect(this.ctx!.destination)
     } catch (e: any) {
-      // CORS taint — fallback to synthetic rave but keep element for audible fallback
-      console.warn('createMediaElementSource CORS fail', e)
-      this.onStatusCb('error', 'Audio CORS blocked — using synthesized rave (visuals still reactive). Try File/System for real audio.')
+      console.warn('createMediaElementSource CORS fallback', e)
+      this.onStatusCb('error', 'Audio CORS blocked — using synthesized rave (visuals fully reactive). Try File/System audio.')
       try { el.src = src; el.play().catch(() => {}) } catch {}
-      // still fabricate metrics via synth, but also try to keep analyser partially fed via element->destination if allowed
       this.sourceLabel = label + ' (CORS fallback)'; this.captureKind = (opts?.kind || 'file') as any; this.resetAdaptive(); this.setSynthetic(true); this.synth.bpm = 140; this.lastSoundAt = performance.now(); this.onStatusCb('connected', this.sourceLabel); return el
     }
     this.sourceLabel = label; this.captureKind = opts?.kind || 'file'; this.resetAdaptive()
     const p = el.play(); if (p && (p as any).catch) (p as any).catch((e: any) => this.onStatusCb('error', 'Tap Play to start audio (' + (e?.message || 'autoplay blocked') + ')'))
     this.lastSoundAt = performance.now(); this.onStatusCb('connected', this.sourceLabel)
-    el.addEventListener('error', () => { this.onStatusCb('error', 'Audio load failed — CORS or network. Switched to synth.'); this.setSynthetic(true) }); return el
+    el.addEventListener('error', () => { this.onStatusCb('error', 'Audio load failed — switched to synth.'); this.setSynthetic(true) }); return el
   }
-  // Guaranteed CORS-free rave: WebAudio oscillators directly feeding analyser + destination
   useSynthRave(bpm = 140) {
     this.ensureContext(); this.disconnect(); this.resume(); this.resetAdaptive()
     this.synth.bpm = bpm; this.setSynthetic(false)
-    // Build a simple rave: kick (50Hz) + bass + hats via periodic scheduling
     const ctx = this.ctx!
     const master = ctx.createGain(); master.gain.value = 0.42; master.connect(this.gainTrim!); master.connect(ctx.destination)
     let phase = 0
     const schedule = () => {
+      if (this.captureKind !== 'demo') return
       const now = ctx.currentTime
-      // kick every beat
       const kick = ctx.createOscillator(); kick.frequency.value = 55; const kg = ctx.createGain(); kick.connect(kg); kg.connect(master); kg.gain.setValueAtTime(1, now); kg.gain.exponentialRampToValueAtTime(0.01, now + 0.18); kick.start(now); kick.stop(now + 0.2)
-      // bass
       const bass = ctx.createOscillator(); bass.type = 'sawtooth'; bass.frequency.value = 110 + Math.sin(phase) * 8; const bg = ctx.createGain(); bass.connect(bg); bg.connect(master); bg.gain.setValueAtTime(0.18, now); bg.gain.linearRampToValueAtTime(0.02, now + 0.22); bass.start(now); bass.stop(now + 0.23)
-      // hats
       if (Math.random() < 0.7) { const h = ctx.createOscillator(); h.frequency.value = 8000; const hg = ctx.createGain(); h.connect(hg); hg.connect(master); hg.gain.setValueAtTime(0.08, now + 0.05); hg.gain.exponentialRampToValueAtTime(0.001, now + 0.09); h.start(now + 0.05); h.stop(now + 0.1) }
       phase += 0.22; setTimeout(schedule, 60000 / bpm)
     }
+    this.captureKind = 'demo'
     schedule()
-    // Keep a dummy mediaEl for label consistency
-    this.mediaEl = new Audio(); this.sourceLabel = `synth-rave ${bpm} BPM`; this.captureKind = 'demo' as any; this.lastSoundAt = performance.now(); this.onStatusCb('connected', this.sourceLabel); return this.mediaEl
+    this.mediaEl = new Audio(); this.sourceLabel = `synth-rave ${bpm} BPM`; this.lastSoundAt = performance.now(); this.onStatusCb('connected', this.sourceLabel); return this.mediaEl
   }
   useDemo(idx?: number) {
     if (typeof idx === 'number') this.demoIdx = ((idx % DEMO_TRACKS.length) + DEMO_TRACKS.length) % DEMO_TRACKS.length
     const track = DEMO_TRACKS[this.demoIdx]
-    // Try real MP3 first, but if it errors quickly we will fallback to synth rave in main.ts error handler.
-    // To guarantee sound even when offline/CORS, also ensure synth is disabled initially.
     try {
       const el = this.useMediaElement(track.url, 'demo: ' + track.title + ' — ' + track.artist, { loop: true, kind: 'demo' as any })
       this.synth.bpm = track.bpm; this.setSynthetic(false); if (this.gainTrim) this.gainTrim.gain.value = 1.1
-      // If createMediaElementSource failed, useMediaElement already fell back to synth; detect and switch to true synth rave
       if (this.sourceLabel.includes('CORS fallback')) { this.useSynthRave(track.bpm) }
       return el
     } catch {
@@ -267,7 +261,6 @@ export class AudioEngine {
     this.onStatusCb('error', 'Direct YouTube audio not available on this host. Use Demo Rave / File / System capture (tab audio).'); return null
   }
 
-  // Multi-band uniform snapshot for TSL/GLSL
   getUniforms() {
     return {
       bass: this.bands.bass?.norm || 0, mid: this.bands.mid?.norm || 0, treble: this.bands.air?.norm || 0,
@@ -278,7 +271,6 @@ export class AudioEngine {
     }
   }
 
-  // internal mappers
   private buildMaps() {
     const nyquist = this.ctx!.sampleRate / 2; const bins = this.analyser!.frequencyBinCount; const fMin = 25, fMax = Math.min(17000, nyquist)
     this.bandEdges = new Int32Array(BAND_COUNT + 1)
@@ -309,7 +301,9 @@ export class AudioEngine {
     for (let i = 0; i < BAND_COUNT; i++) {
       const lo = this.bandEdges![i], hi = this.bandEdges![i + 1]; let sum = 0
       for (let b = lo; b < hi; b++) { sum += this.freqData![b]; if (this.freqData![b] > 250) hot++ }
-      const v = clamp01(sum / Math.max(1, hi - lo) / 255 * g)
+      // Per-bin frequency EQ weighting curve (boost higher bands slightly for full range visuals)
+      const eqWeight = 1.0 + Math.pow(i / BAND_COUNT, 1.4) * 0.45
+      const v = clamp01((sum / Math.max(1, hi - lo) / 255) * g * eqWeight)
       this.metrics.bands[i] += (v - this.metrics.bands[i]) * 0.45
       const d = v - this.binPrev[i]; if (d > 0) flux += d
       this.metrics.onsets[i] = Math.max(this.metrics.onsets[i] * 0.86, d > 0.035 ? clamp01(d * 6) : 0); this.binPrev[i] = v
@@ -326,7 +320,8 @@ export class AudioEngine {
     for (let k = 0; k < BAND_DEFS.length; k++) {
       const b = this.bands[BAND_DEFS[k].key], range = this.bandDefBins![k]
       let sum = 0; for (let i = range[0]; i <= range[1]; i++) sum += this.freqData![i]
-      const raw = clamp01(sum / Math.max(1, range[1] - range[0] + 1) / 255 * g)
+      const eqWeight = k > 3 ? 1.0 + (k - 3) * 0.12 : 1.0
+      const raw = clamp01((sum / Math.max(1, range[1] - range[0] + 1) / 255) * g * eqWeight)
       b.raw = raw; b.level += (raw - b.level) * 0.4; b.norm = b.raw + (rangeNorm(b, raw) - b.raw) * this.config.adaptive
       b.env += b.norm > b.env ? (b.norm - b.env) * this.config.attack : (b.norm - b.env) * this.config.release
       const rise = raw - b.prev; b.hit = rise > 0.05 && b.norm > 0.35; b.onset = Math.max(b.onset * 0.85, b.hit ? clamp01(rise * 7) : 0); b.prev = raw
