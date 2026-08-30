@@ -15,8 +15,8 @@ import { WarpEngine } from './render/WarpEngine'
 import { CyberGridEngine } from './render/CyberGridEngine'
 import { buildRegistry } from './modes/registry'
 import { mountPanel } from './ui/Panel'
-import { XRManager } from './xr/XRManager'
-import * as THREE from 'three'
+import { World3D } from './render/World3D'
+import { WORLDS } from './render/worlds3d'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 
@@ -28,6 +28,7 @@ app.innerHTML = `
     <canvas id="geo" class="stage"></canvas>
     <canvas id="warp" class="stage"></canvas>
     <canvas id="cyber" class="stage"></canvas>
+    <canvas id="world3d" class="stage"></canvas>
   </div>
   <div id="ui-root"></div>
   <div id="flash"><div class="fname"></div><div class="fgroup"></div></div>
@@ -39,6 +40,7 @@ const fractalCanvas = document.getElementById('fractal') as HTMLCanvasElement
 const geoCanvas = document.getElementById('geo') as HTMLCanvasElement
 const warpCanvas = document.getElementById('warp') as HTMLCanvasElement
 const cyberCanvas = document.getElementById('cyber') as HTMLCanvasElement
+const w3dCanvas = document.getElementById('world3d') as HTMLCanvasElement
 const uiRoot = document.getElementById('ui-root') as HTMLDivElement
 
 const palette = new Palette()
@@ -48,6 +50,7 @@ const fractal = new FractalEngine(fractalCanvas, palette)
 const geometry = new GeometryEngine(geoCanvas, palette)
 const warp = new WarpEngine(warpCanvas, palette)
 const cyber = new CyberGridEngine(cyberCanvas, palette)
+const w3d = new World3D(w3dCanvas, palette)
 
 const MODES = buildRegistry()
 let modeIdx = 0
@@ -80,7 +83,8 @@ function spotifyEmbedUrl(input: string): string | null {
   const p = parseSpotify(input); if (!p) return null
   return `https://open.spotify.com/embed/${p.type}/${p.id}?utm_source=generator&theme=0`
 }
-let spotifyEmbedSrc = localStorage.getItem('mv.spotify.embed') || 'https://open.spotify.com/embed/playlist/37i9dQZF1DX0XUsuxWHRQd?utm_source=generator'
+const DEFAULT_SPOTIFY = 'https://open.spotify.com/playlist/1gGHjgHQTT8ae4vm8F8gZG'
+let spotifyEmbedSrc = localStorage.getItem('mv.spotify.embed') || spotifyEmbedUrl(DEFAULT_SPOTIFY)!
 
 function current() { return MODES[modeIdx] }
 function activeCanvas() {
@@ -89,6 +93,7 @@ function activeCanvas() {
   if (e === 'geometry') return geoCanvas
   if (e === 'warp') return warpCanvas
   if (e === 'cyber') return cyberCanvas
+  if (e === 'world3d') return w3dCanvas
   return fluidCanvas
 }
 
@@ -106,6 +111,8 @@ function applyMode(idx: number) {
   geoCanvas.classList.toggle('inactive', m.engine !== 'geometry')
   warpCanvas.classList.toggle('inactive', m.engine !== 'warp')
   cyberCanvas.classList.toggle('inactive', m.engine !== 'cyber')
+  w3dCanvas.classList.toggle('inactive', m.engine !== 'world3d')
+  if (m.engine === 'world3d') { w3d.setWorld((m as any).world); w3d.resize() }
 
   if (m.engine === 'fluid') { fluid.resize(); if ((m as any).physics) { const p: any = (m as any).physics; fluid.config.DENSITY_DISSIPATION = p.diss; fluid.config.CURL = p.vort; fluid.config.VISCOSITY = p.visc; fluid.config.SPLAT_RADIUS = p.radius } fluid.clear() }
   if (m.engine === 'fractal') fractal.resize()
@@ -221,6 +228,8 @@ mountPanel(uiRoot, MODES, {
   onMode: (v) => { if (v === 1 || v === -1) stepMode(v); else applyMode(v) },
   onRandom: randomMode,
   onFullscreen: toggleFullscreen,
+  onVR: () => enterVR(),
+  onBirdFly: () => toggleBirdFlight(),
   onDemo: async () => {
     audio.unlock()
     let el: any = null
@@ -342,6 +351,7 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === '[') { stepMode(-1) }
   else if (e.key === ']') { stepMode(1) }
   else if (e.key === 'r' || e.key === 'R') { randomMode() }
+  else if (e.key === 'v' || e.key === 'V') { toggleBirdFlight() }
   else if (e.key === 'p' || e.key === 'P') {
     const sel = document.getElementById('sel-pal') as HTMLSelectElement
     if (sel) {
@@ -363,6 +373,9 @@ try { cyberOk = cyber.init() } catch (e) { console.error('cyber init fail', e) }
 if (!fluidOk && !fractalOk && !geoOk && !warpOk && !cyberOk) {
   toast('WebGL2 unavailable — please check WebGL support', true)
 }
+
+// Pre-fill the Spotify player so it's one click from playing
+loadSpotifyEmbed(localStorage.getItem('mv.spotify.embed') || DEFAULT_SPOTIFY)
 
 const saved = localStorage.getItem('mv.mode'); let sIdx = MODES.findIndex(m => m.id === saved); if (sIdx < 0) sIdx = 0; applyMode(sIdx)
 const savedPal = localStorage.getItem('mv.palette'); if (savedPal) { (palette as any).set(savedPal); const sel = document.getElementById('sel-pal') as HTMLSelectElement; if (sel) sel.value = savedPal }
@@ -398,27 +411,40 @@ window.addEventListener('touchend', unlock, { passive: true } as any)
 window.addEventListener('mousedown', unlock as any)
 window.addEventListener('keydown', unlock as any)
 
-// --- Three scene for XR ---
-const threeCanvas = document.createElement('canvas')
-const threeRenderer = new THREE.WebGLRenderer({ canvas: threeCanvas, antialias: true, alpha: false })
-threeRenderer.setPixelRatio(Math.min(devicePixelRatio, 2))
-const threeScene = new THREE.Scene(); threeScene.background = new THREE.Color(0x000000)
-const threeCamera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 100); threeCamera.position.z = 2
-const xr = new XRManager(threeRenderer, threeScene, threeCamera)
-xr.available().then(ok => {
-  const b = document.getElementById('b-vr') as HTMLButtonElement
-  if (!ok || !b) return
-  b.hidden = false
-  b.addEventListener('click', async () => {
-    if (xr.isActive()) xr.stop()
-    else {
-      try {
-        await xr.start((active: boolean) => { b.textContent = active ? 'Exit VR' : 'Enter VR 6DOF' })
-        toast('6DOF: thumbstick fly · grip drag · pinch')
-      } catch (e: any) { toast('VR failed: ' + (e as Error).message, true) }
-    }
-  })
-})
+// --- 3D Spatial World: VR headset flight + desktop bird flight ---
+/** Jump to the 3D twin of whatever 2D mode is showing, so VR/flight always has a world. */
+function enter3D(): boolean {
+  if (current().engine === 'world3d') return true
+  const i = MODES.findIndex(m => m.engine === 'world3d' && m.world === current().id)
+  if (i < 0) return false
+  applyMode(i)
+  return true
+}
+
+async function enterVR() {
+  if (w3d.isVRActive()) { w3d.stopVR(); return }
+  if (!enter3D()) { toast('This mode has no 3D version', true); return }
+  if (!(await w3d.isVRAvailable())) {
+    toast('No VR headset detected — starting 3D bird flight instead', true)
+    w3d.setDesktopFlight(true)
+    return
+  }
+  try {
+    await w3d.startVR((active: boolean) => {
+      const b = document.getElementById('b-vr') as HTMLButtonElement
+      if (b) b.textContent = active ? 'Exit VR' : 'Enter WebXR VR (6DOF Headset Flight)'
+    })
+    toast('6DOF flight — thumbstick to fly · trigger to soar in gaze direction')
+  } catch (e) { toast('VR failed: ' + (e as Error).message, true) }
+}
+
+function toggleBirdFlight() {
+  if (!enter3D()) { toast('This mode has no 3D version', true); return }
+  const on = w3d.toggleDesktopFlight()
+  toast(on ? 'Bird flight ON — WASD fly · mouse look · Space/C up-down · Shift boost · Esc to land' : 'Bird flight OFF')
+}
+
+window.addEventListener('resize', () => { if (current().engine === 'world3d') w3d.resize() })
 
 // --- Main Render Loop ---
 let last = performance.now(), vt = 0
@@ -458,7 +484,9 @@ function loop(now: number, xrFrame?: any) {
 
   const mode = current()
   try {
-    if (mode.engine === 'fluid' && fluidOk) {
+    if (mode.engine === 'world3d') {
+      w3d.render(m, dt, state.flySpeed)
+    } else if (mode.engine === 'fluid' && fluidOk) {
       fluid.beginFrame()
       const bass = m.band.bass.norm, mid = m.band.mid.norm
       if ((mode as any).id === 'spectrum-fountain') {
@@ -535,12 +563,15 @@ function loop(now: number, xrFrame?: any) {
   })
   const bpmEl = document.getElementById('bpm'); if (bpmEl && m.bpm) bpmEl.textContent = `Tempo ${m.bpm} BPM${m.synthetic && !m.live ? ' (synth)' : ''} · centroid ${Math.round(m.centroid * 100)}%`
 
-  if (xrFrame) xr.handleInput(xrFrame)
-  xr.raf(loop as any)
 }
-xr.raf(loop as any)
+w3d.setLoop(loop)
 
 ;(window as any).FluidSimInstance = fluid
 ;(window as any).audio = audio
 ;(window as any).palette = palette
-console.log('[MusicViz] Next-Gen platform booted — modes count:', MODES.length)
+// Every 2D mode must have a 3D twin with a real world behind it — shout if one is missing.
+const missing3D = MODES.filter(m => m.engine === 'world3d' && !WORLDS[(m as any).world]).map(m => m.id)
+if (missing3D.length) { console.error('[MusicViz] 3D worlds missing:', missing3D); toast('Missing 3D worlds: ' + missing3D.join(', '), true) }
+
+console.log('[MusicViz] Next-Gen platform booted — modes:', MODES.length,
+  '(2D:', MODES.filter(m => m.engine !== 'world3d').length, '· 3D:', MODES.filter(m => m.engine === 'world3d').length + ')')

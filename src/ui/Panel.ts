@@ -1,7 +1,7 @@
 /**
  * Panel — Glassmorphic HUD & Control Drawer UI
  * Features top HUD bar, reactive EQ spectrum bars, audio source pickers, visual modes,
- * audio reactivity sliders, palette options, and fluid/raymarching settings.
+ * 3D VR spatial flight entry, Bird flight simulator, reactivity sliders, and palette options.
  */
 export type PanelOpts = {
   onMode: (idx: number) => void
@@ -16,6 +16,8 @@ export type PanelOpts = {
   onFile: (f: File) => void
   onSpotifyCapture: () => void
   onFullscreen: () => void
+  onVR: () => void
+  onBirdFly: () => void
 }
 
 export function mountPanel(root: HTMLElement, modes: any[], opts: PanelOpts) {
@@ -30,6 +32,8 @@ export function mountPanel(root: HTMLElement, modes: any[], opts: PanelOpts) {
       <select id="hud-sel-mode" style="max-width: 140px; padding: 4px 8px; font-size: 11px;"></select>
       <button id="b-hud-next" class="hud-btn" title="Next Mode ( ] )">›</button>
       <button id="b-hud-rand" class="hud-btn" title="Random Mode ( R )">🔀</button>
+      <button id="b-hud-fly" class="hud-btn primary" title="Toggle 3D Bird Flight Simulator ( V )">🕊️ Fly</button>
+      <button id="b-hud-vr" class="hud-btn accent" title="Enter WebXR VR ( 6DOF Flight )">🥽 VR</button>
       <button id="b-hud-fs" class="hud-btn" title="Toggle Fullscreen ( F )">⛶</button>
     </div>
   </header>
@@ -39,7 +43,7 @@ export function mountPanel(root: HTMLElement, modes: any[], opts: PanelOpts) {
   <aside id="panel">
     <div class="ph">
       <span class="pt">Visualizer Control Drawer</span>
-      <span class="phint">H hide · F full · R random</span>
+      <span class="phint">H hide · F full · V fly · R random</span>
     </div>
 
     <section class="sec" data-sec="source">
@@ -89,7 +93,7 @@ export function mountPanel(root: HTMLElement, modes: any[], opts: PanelOpts) {
     </section>
 
     <section class="sec" data-sec="visual">
-      <div class="sh"><span class="chev">▼</span>Visualizer Mode & Palette</div>
+      <div class="sh"><span class="chev">▼</span>Visualizer Mode & Spatial VR</div>
       <div class="sb">
         <label>Animation Mode <span id="mode-count"></span></label>
         <select id="sel-mode"></select>
@@ -98,7 +102,14 @@ export function mountPanel(root: HTMLElement, modes: any[], opts: PanelOpts) {
           <button id="b-rand">Random</button>
           <button id="b-next">Next ›</button>
         </div>
-        <button id="b-vr" hidden style="width:100%;margin-top:8px;">Enter WebXR 6DOF</button>
+
+        <div class="card" style="margin-top:10px; background:rgba(0, 240, 255, 0.08); border-color:rgba(0, 240, 255, 0.3);">
+          <label style="color:#00f0ff; font-weight:700;">🥽 3D Spatial VR & Bird Flight</label>
+          <button id="b-vr" class="accent" style="width:100%; margin-top:4px;">Enter WebXR VR (6DOF Headset Flight)</button>
+          <button id="b-bird-fly" class="primary" style="width:100%; margin-top:6px;">🕊️ 3D Bird Flight Simulator (WASD / Look)</button>
+          <div class="note" style="margin-top:6px; font-size:10px;">Fly like a bird in full 3D space through floating cosmic stars, cyber terrain, and glowing warp corridors!</div>
+        </div>
+
         <label>Color Palette</label>
         <select id="sel-pal">
           <option value="rainbow">Rainbow Cycle</option>
@@ -135,7 +146,7 @@ export function mountPanel(root: HTMLElement, modes: any[], opts: PanelOpts) {
       <div class="sh"><span class="chev">▼</span>Fractal & Raymarching Settings</div>
       <div class="sb">
         <label>Shader Detail <span id="v-detail">60%</span><input id="s-detail" type="range" min="10" max="100" step="5" value="60"/></label>
-        <label>Zoom Level <span id="v-zoom">1.00×</span><input id="s-zoom" type="range" min="-100" max="600" step="1" value="0"/></label>
+        <label>Zoom Level <span id="v-zoom">1.00×</span><input id="s-zoom" type="range" min="-100" max="200" step="1" value="0"/></label>
         <label>Fractal Seed Morph <span id="v-morph">0%</span><input id="s-morph" type="range" min="0" max="100" step="1" value="0"/></label>
         <label>Auto-Morph Speed <span id="v-morph-rate">0%</span><input id="s-morph-rate" type="range" min="0" max="100" step="5" value="0"/></label>
         <button id="b-reset-view" style="width:100%; margin-top:6px;">Reset Camera View</button>
@@ -175,6 +186,11 @@ export function mountPanel(root: HTMLElement, modes: any[], opts: PanelOpts) {
   $('b-hud-next')?.addEventListener('click', () => opts.onMode(1))
   $('b-hud-rand')?.addEventListener('click', opts.onRandom)
   $('b-hud-fs')?.addEventListener('click', opts.onFullscreen)
+  $('b-hud-vr')?.addEventListener('click', opts.onVR)
+  $('b-hud-fly')?.addEventListener('click', opts.onBirdFly)
+
+  $('b-vr')?.addEventListener('click', opts.onVR)
+  $('b-bird-fly')?.addEventListener('click', opts.onBirdFly)
 
   // Populate mode dropdowns (Drawer & HUD)
   const selDrawer = root.querySelector('#sel-mode') as HTMLSelectElement

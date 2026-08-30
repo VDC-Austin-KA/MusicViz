@@ -1,7 +1,8 @@
 import { GeometryModes } from '../render/GeometryEngine'
 
-// Central mode registry — modular swapping Fluid / Fractal / Geometry / Warp / Cyber / Hybrid
-export type Engine = 'fluid' | 'fractal' | 'geometry' | 'warp' | 'cyber' | 'viz2d'
+// Central mode registry — modular swapping Warp / Cyber / Fluid / Fractal / Geometry / Hybrid,
+// each with a matching bespoke 3D fly-through twin (engine 'world3d').
+export type Engine = 'world3d' | 'fluid' | 'fractal' | 'geometry' | 'warp' | 'cyber' | 'viz2d'
 
 export interface Mode {
   id: string; name: string; group: string
@@ -12,6 +13,8 @@ export interface Mode {
   detail?: number
   timeScale?: number
   palSpeed?: number
+  /** for engine 'world3d': which world in worlds3d.ts to build (the 2D mode's id) */
+  world?: string
   drive?: (ctx: any) => void
   draw?: (g: any, W: number, H: number, t: number, m: any, S: any, env: any) => void
 }
@@ -38,12 +41,24 @@ export const fractalModes: Mode[] = [
   { id: 'mandala', name: 'Third Eye Mandala', group: 'Fractal · Endless', engine: 'fractal', shader: 'mandala', detail: 0.6 },
 ]
 
+/** the 3D twin of a 2D mode — same idea, rebuilt as geometry you fly through */
+function twin3D(m: Mode): Mode {
+  return {
+    id: m.id + '-3d',
+    name: m.name + ' 3D',
+    group: m.group.split(' · ')[0] + ' · 3D Flight',
+    engine: 'world3d',
+    world: m.id,
+  }
+}
+
 export function buildRegistry(): Mode[] {
-  const out: Mode[] = []
-  warpModes.forEach(m => out.push(m))
-  cyberModes.forEach(m => out.push(m))
-  fractalModes.forEach(m => out.push(m))
-  fluidModes.forEach(m => out.push(m))
-  GeometryModes.forEach(m => out.push({ ...m, engine: 'geometry' } as Mode))
-  return out
+  const flat: Mode[] = []
+  warpModes.forEach(m => flat.push(m))
+  cyberModes.forEach(m => flat.push(m))
+  fractalModes.forEach(m => flat.push(m))
+  fluidModes.forEach(m => flat.push(m))
+  GeometryModes.forEach(m => flat.push({ ...m, engine: 'geometry' } as Mode))
+  // Originals first and unchanged, then one bespoke 3D world for each of them.
+  return [...flat, ...flat.map(twin3D)]
 }
