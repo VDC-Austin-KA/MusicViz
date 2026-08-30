@@ -107,7 +107,9 @@ export function mountPanel(root: HTMLElement, modes: any[], opts: PanelOpts) {
           <label style="color:#00f0ff; font-weight:700;">🥽 3D Spatial VR & Bird Flight</label>
           <button id="b-vr" class="accent" style="width:100%; margin-top:4px;">Enter WebXR VR (6DOF Headset Flight)</button>
           <button id="b-bird-fly" class="primary" style="width:100%; margin-top:6px;">🕊️ 3D Bird Flight Simulator (WASD / Look)</button>
-          <div class="note" style="margin-top:6px; font-size:10px;">Fly like a bird in full 3D space through floating cosmic stars, cyber terrain, and glowing warp corridors!</div>
+          <div class="note" style="margin-top:6px; font-size:10px;">Every 2D mode has its own 3D world — VR / Fly drops you into the one you're watching.<br/>
+          <b>Spotify in VR:</b> hit play in the player above, then Enter VR. The first press captures this tab's audio (one browser prompt, here on the flat page) — press again to launch. Inside the headset there are no prompts, and the stream survives entering/exiting VR.<br/>
+          In-headset: trigger clicks the floating panel · grip recalls it · ▾ hides it.</div>
         </div>
 
         <label>Color Palette</label>

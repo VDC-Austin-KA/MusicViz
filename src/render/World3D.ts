@@ -8,6 +8,7 @@
 import * as THREE from 'three'
 import { Palette } from '../core/Palette'
 import { WORLDS, WorldSpec } from './worlds3d'
+import { VRPanel, VRPanelState } from '../xr/VRPanel'
 
 export class World3D {
   private renderer: THREE.WebGLRenderer
@@ -25,6 +26,15 @@ export class World3D {
   private xrActive = false
   private onXRChange?: (active: boolean) => void
 
+  // in-headset UI lives outside `group` so world flight never drags it along
+  private ui = new THREE.Group()
+  private panel: VRPanel | null = null
+  private panelState: (() => VRPanelState) | null = null
+  private controllers: THREE.XRTargetRaySpace[] = []
+  private hovering: (string | null)[] = [null, null]
+  private ray = new THREE.Raycaster()
+  private mat4 = new THREE.Matrix4()
+
   private flightActive = false
   private pos = new THREE.Vector3(0, 0, 18)
   private vel = new THREE.Vector3()
@@ -37,10 +47,17 @@ export class World3D {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
     this.renderer.xr.enabled = true
+    // standalone headsets render two eyes on a mobile GPU — trade a little sharpness for framerate
+    if (/OculusBrowser|Quest|Pico/i.test(navigator.userAgent)) {
+      this.renderer.setPixelRatio(1)
+      this.renderer.xr.setFramebufferScaleFactor?.(0.85)
+    }
 
     this.scene = new THREE.Scene()
     this.scene.background = new THREE.Color(0x03030a)
     this.scene.add(this.group)
+    this.ui.visible = false
+    this.scene.add(this.ui)
 
     this.camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 600)
     this.camera.position.copy(this.pos)
@@ -58,6 +75,45 @@ export class World3D {
       // Esc releases the pointer — land the bird rather than leave it flying blind.
       if (!this.locked) this.flightActive = false
     })
+
+    // XR controllers: a pointing ray each, trigger to click the panel
+    for (let i = 0; i < 2; i++) {
+      const ctrl = this.renderer.xr.getController(i)
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]),
+        new THREE.LineBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.6 })
+      )
+      line.scale.z = 5
+      ctrl.add(line)
+      ctrl.addEventListener('selectstart', () => this.onSelect(i))
+      // squeeze recalls a panel you have flown away from
+      ctrl.addEventListener('squeezestart', () => { if (this.panel) this.panel.placeInFrontOf(this.camera) })
+      this.scene.add(ctrl)
+      this.controllers.push(ctrl)
+    }
+  }
+
+  // --- in-headset UI ---
+  setPanel(panel: VRPanel, stateFn: () => VRPanelState) {
+    this.panel = panel
+    this.panelState = stateFn
+    this.ui.add(panel.mesh)
+  }
+
+  /** ray from a controller against the panel; returns the UV hit if any */
+  private panelHit(i: number): THREE.Vector2 | null {
+    const ctrl = this.controllers[i]
+    if (!ctrl || !this.panel) return null
+    this.mat4.identity().extractRotation(ctrl.matrixWorld)
+    this.ray.ray.origin.setFromMatrixPosition(ctrl.matrixWorld)
+    this.ray.ray.direction.set(0, 0, -1).applyMatrix4(this.mat4)
+    const hit = this.ray.intersectObject(this.panel.mesh, false)[0]
+    return hit?.uv ? hit.uv : null
+  }
+
+  private onSelect(i: number) {
+    const uv = this.panelHit(i)
+    if (uv && this.panel) this.panel.activate(uv)
   }
 
   // --- world swapping ---
@@ -105,6 +161,7 @@ export class World3D {
     try { this.refSpace = await (this.xrSession as any).requestReferenceSpace('local-floor') }
     catch { this.refSpace = await (this.xrSession as any).requestReferenceSpace('local') }
     this.xrActive = true
+    this.panel?.placeInFrontOf(this.camera)
     onChange?.(true)
     this.xrSession!.addEventListener('end', () => {
       this.xrActive = false; this.xrSession = null; this.refSpace = null
@@ -145,17 +202,18 @@ export class World3D {
 
   private flyXR(dt: number, speedScale: number) {
     if (!this.xrSession) return
-    for (const src of Array.from((this.xrSession as any).inputSources || []) as any[]) {
-      const gp = src.gamepad
+    const sources = Array.from((this.xrSession as any).inputSources || []) as any[]
+    for (let i = 0; i < sources.length; i++) {
+      const gp = sources[i].gamepad
       if (!gp) continue
       const ax = gp.axes[2] ?? gp.axes[0] ?? 0, ay = gp.axes[3] ?? gp.axes[1] ?? 0
       if (Math.abs(ax) > 0.15 || Math.abs(ay) > 0.15) {
         const dir = new THREE.Vector3(ax, 0, ay).applyQuaternion(this.camera.quaternion)
         this.pos.addScaledVector(dir, 10 * speedScale * dt)
       }
-      // trigger = soar in whatever direction you're looking
+      // trigger = soar along your gaze, unless this hand is pointing at the panel
       const trig = gp.buttons?.[0]
-      if (trig?.pressed) {
+      if (trig?.pressed && !this.hovering[i]) {
         const gaze = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion)
         this.pos.addScaledVector(gaze, 20 * (trig.value || 1) * speedScale * dt)
       }
@@ -178,6 +236,22 @@ export class World3D {
 
   render(m: any, dt: number, speedScale = 1) {
     if (!this.spec) return
+
+    // in-headset UI: hover from both rays, soft-follow, throttled repaint
+    if (this.isVRActive() && this.panel && this.panelState) {
+      this.ui.visible = true
+      for (let i = 0; i < this.controllers.length; i++) {
+        const uv = this.panelHit(i)
+        this.hovering[i] = uv ? this.panel.hit(uv) : null
+      }
+      this.panel.setHover(this.hovering.find(h => h) || null)
+      this.panel.follow(this.camera, dt)
+      this.panel.update(this.panelState(), performance.now())
+    } else {
+      this.ui.visible = false
+      this.hovering[0] = this.hovering[1] = null
+    }
+
     if (this.isVRActive()) this.flyXR(dt, speedScale)
     else if (this.flightActive) this.flyDesktop(dt, speedScale)
     else {

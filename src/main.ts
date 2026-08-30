@@ -16,7 +16,8 @@ import { CyberGridEngine } from './render/CyberGridEngine'
 import { buildRegistry } from './modes/registry'
 import { mountPanel } from './ui/Panel'
 import { World3D } from './render/World3D'
-import { WORLDS } from './render/worlds3d'
+import { WORLDS, setWorldQuality } from './render/worlds3d'
+import { VRPanel, VRPanelState } from './xr/VRPanel'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 
@@ -51,6 +52,12 @@ const geometry = new GeometryEngine(geoCanvas, palette)
 const warp = new WarpEngine(warpCanvas, palette)
 const cyber = new CyberGridEngine(cyberCanvas, palette)
 const w3d = new World3D(w3dCanvas, palette)
+
+// Standalone headset browsers (Meta Quest, Pico) run a mobile GPU at two eyes x 72-90Hz
+// and expose no tab/system audio capture. Both facts change how the app behaves.
+const IS_HEADSET_BROWSER = /OculusBrowser|Quest|Pico|VR/i.test(navigator.userAgent)
+const CAN_CAPTURE_TAB = !!(navigator.mediaDevices as any)?.getDisplayMedia
+if (IS_HEADSET_BROWSER) setWorldQuality(0.35)
 
 const MODES = buildRegistry()
 let modeIdx = 0
@@ -421,13 +428,64 @@ function enter3D(): boolean {
   return true
 }
 
+/**
+ * Tab audio capture always shows a browser picker, and getDisplayMedia cannot be called
+ * from inside an immersive session at all — so we take that one prompt here, on the flat
+ * page, before the headset goes on. The MediaStream outlives the XR session, so Spotify
+ * (or any tab audio) keeps feeding the analyser with zero prompts once you are in VR,
+ * including across repeated enter/exit.
+ */
+async function armVRAudio(): Promise<boolean> {
+  if (audio.hasLiveCapture()) return true
+  audio.unlock()
+  return !!(await (audio as any).useSystemAudio?.('Spotify player', false))
+}
+
+/**
+ * A standalone headset browser has no getDisplayMedia at all — there is no tab or
+ * system audio to capture, and no desktop to capture it from. Give VR a source that
+ * needs no permission whatsoever instead of entering to silence.
+ */
+function ensureHeadsetAudio() {
+  if (audio.hasLiveCapture()) return
+  if (lastMetrics && !lastMetrics.synthetic) return // an <audio> source is already feeding
+  audio.unlock()
+  document.getElementById('b-demo')?.dispatchEvent(new Event('click'))
+  toast('Headset browser cannot capture tab audio — started the demo track')
+}
+
+/** Why can't we go to VR? Say the actual reason instead of "no headset". */
+function vrBlockReason(): string | null {
+  if (!window.isSecureContext) return 'WebXR needs a secure page — open this over https:// (http only works on localhost)'
+  if (!navigator.xr) return 'This browser has no WebXR. On Quest use the built-in Meta Browser.'
+  return null
+}
+
 async function enterVR() {
   if (w3d.isVRActive()) { w3d.stopVR(); return }
   if (!enter3D()) { toast('This mode has no 3D version', true); return }
+
+  const blocked = vrBlockReason()
+  if (blocked) { toast(blocked, true); return }
+
   if (!(await w3d.isVRAvailable())) {
     toast('No VR headset detected — starting 3D bird flight instead', true)
     w3d.setDesktopFlight(true)
     return
+  }
+
+  if (CAN_CAPTURE_TAB) {
+    // Arm the audio first. requestSession needs its own fresh click, so we stop here
+    // and let the next press launch — one extra tap, and never a prompt inside VR.
+    if (!audio.hasLiveCapture()) {
+      const armed = await armVRAudio()
+      toast(armed
+        ? 'Audio armed — press Enter VR again to launch (no more prompts)'
+        : 'No tab audio armed — VR will use the demo/synth source', !armed)
+      if (armed) return
+    }
+  } else {
+    ensureHeadsetAudio()
   }
   try {
     await w3d.startVR((active: boolean) => {
@@ -445,6 +503,61 @@ function toggleBirdFlight() {
 }
 
 window.addEventListener('resize', () => { if (current().engine === 'world3d') w3d.resize() })
+
+// --- in-headset control panel ---
+// Actions drive the existing DOM controls rather than re-implementing them, so the
+// flat drawer and the VR panel can never disagree about what a control does.
+function driveSlider(id: string, v: number) {
+  const el = document.getElementById(id) as HTMLInputElement
+  if (!el) return
+  el.value = String(v)
+  el.dispatchEvent(new Event('input'))
+}
+const PALETTES = ['rainbow', 'neon', 'vapor', 'aurora', 'magma', 'mono', 'album']
+const METER_BANDS = ['subBass', 'bass', 'lowMid', 'mid', 'highMid', 'presence', 'air']
+const VR_SLIDERS: Record<string, { id: string; min: number; max: number; label: string; fmt: (v: number) => string }> = {
+  gain: { id: 's-gain', min: 0.2, max: 4, label: 'Master Gain', fmt: v => v.toFixed(1) },
+  motion: { id: 's-motion', min: 0.15, max: 2, label: 'Motion Speed', fmt: v => v.toFixed(2) + '×' },
+  react: { id: 's-react', min: 0.2, max: 2.5, label: 'Beat Reaction', fmt: v => v.toFixed(1) },
+  fly: { id: 's-fly', min: 0.2, max: 3, label: 'Flight Speed', fmt: v => v.toFixed(1) + '×' },
+}
+
+const vrPanel = new VRPanel({
+  exitVR: () => w3d.stopVR(),
+  setMode: (i) => applyMode(i),
+  stepMode: (d) => stepMode(d),
+  randomMode: () => randomMode(),
+  setPalette: (name) => {
+    const sel = document.getElementById('sel-pal') as HTMLSelectElement
+    if (sel) { sel.value = name; sel.dispatchEvent(new Event('change')) }
+  },
+  setSlider: (k, v) => driveSlider(VR_SLIDERS[k].id, v),
+  demo: () => document.getElementById('b-demo')?.dispatchEvent(new Event('click')),
+  demoNext: () => document.getElementById('b-demo-next')?.dispatchEvent(new Event('click')),
+  demoStop: () => document.getElementById('b-demo-stop')?.dispatchEvent(new Event('click')),
+})
+
+let lastMetrics: any = null
+w3d.setPanel(vrPanel, (): VRPanelState => {
+  const mm = lastMetrics
+  const sliders: any = {}
+  for (const k of Object.keys(VR_SLIDERS)) {
+    const cfg = VR_SLIDERS[k]
+    const el = document.getElementById(cfg.id) as HTMLInputElement
+    sliders[k] = { v: el ? parseFloat(el.value) : cfg.min, min: cfg.min, max: cfg.max, label: cfg.label, fmt: cfg.fmt }
+  }
+  return {
+    modes: MODES,
+    modeIdx,
+    palettes: PALETTES,
+    palette: (palette as any).get?.() || 'rainbow',
+    sliders,
+    track: document.getElementById('hud-track-name')?.textContent || 'No audio source',
+    bpm: mm?.bpm || 0,
+    live: !!mm?.live,
+    meters: METER_BANDS.map(b => mm?.band?.[b]?.env || 0),
+  }
+})
 
 // --- Main Render Loop ---
 let last = performance.now(), vt = 0
@@ -470,6 +583,7 @@ const ctx: any = {
 function loop(now: number, xrFrame?: any) {
   const dt = Math.min((now - last) / 1000, 0.033) * state.motion; last = now; vt += dt * 1000
   const m = audio.update(now); (palette as any).updateMusic(m); updatePointer()
+  lastMetrics = m
   ctx.t = vt
   ctx.dt = dt
   ctx.m = m
@@ -569,6 +683,12 @@ w3d.setLoop(loop)
 ;(window as any).FluidSimInstance = fluid
 ;(window as any).audio = audio
 ;(window as any).palette = palette
+if ((import.meta as any).env?.DEV) {
+  const errs = VRPanel.selfCheck()
+  if (errs.length) { console.error('[MusicViz] VR panel self-check FAILED:', errs); toast('VR panel broken: ' + errs[0], true) }
+  else console.log('[MusicViz] VR panel self-check OK')
+}
+
 // Every 2D mode must have a 3D twin with a real world behind it — shout if one is missing.
 const missing3D = MODES.filter(m => m.engine === 'world3d' && !WORLDS[(m as any).world]).map(m => m.id)
 if (missing3D.length) { console.error('[MusicViz] 3D worlds missing:', missing3D); toast('Missing 3D worlds: ' + missing3D.join(', '), true) }

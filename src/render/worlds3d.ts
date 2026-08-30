@@ -27,6 +27,16 @@ export type WorldSpec = {
 
 const TAU = Math.PI * 2
 
+/**
+ * Particle budget. Standalone headsets (Quest/Pico) render two eyes at 72-90Hz on a
+ * mobile GPU, and several worlds walk their whole point buffer in JS every frame —
+ * so those counts get scaled down there rather than dropping frames.
+ */
+let QUALITY = 1
+export function setWorldQuality(q: number) { QUALITY = Math.max(0.1, Math.min(1, q)) }
+export function getWorldQuality() { return QUALITY }
+const N = (n: number) => Math.max(8, Math.round(n * QUALITY))
+
 // --- shared primitives ---------------------------------------------------
 export function col(p: Palette, t: number): THREE.Color {
   const c = p.sample(((t % 1) + 1) % 1)
@@ -76,7 +86,7 @@ const hyperspaceWarp: WorldSpec = {
       r.position.z = -i * 6
       group.add(r); store.rings.push(r)
     }
-    store.streaks = cloud(2600, palette, 0.16, (_i, v) => {
+    store.streaks = cloud(N(2600), palette, 0.16, (_i, v) => {
       const a = Math.random() * TAU, rad = 4 + Math.random() * 22
       v.set(Math.cos(a) * rad, Math.sin(a) * rad, -Math.random() * 264)
       return Math.random()
@@ -152,10 +162,10 @@ const quantumGrid: WorldSpec = {
 const plasmaVortex: WorldSpec = {
   spawn: [0, 0, 26], fog: 0.006,
   build({ group, palette, store }) {
-    const N = 14000
-    store.seed = new Float32Array(N * 3)
-    store.pts = cloud(N, palette, 0.13, (i, v) => {
-      const arm = i % 3, u = i / N
+    const CNT = N(14000)
+    store.seed = new Float32Array(CNT * 3)
+    store.pts = cloud(CNT, palette, 0.13, (i, v) => {
+      const arm = i % 3, u = i / CNT
       const a = u * TAU * 9 + arm * (TAU / 3)
       const rad = 2 + u * 20
       const h = (Math.random() - 0.5) * (1 + u * 7)
@@ -195,7 +205,7 @@ const sacredGeometry: WorldSpec = {
       group.add(m); return m
     })
     // the field they float in
-    store.halo = cloud(2200, palette, 0.09, (_i, v) => {
+    store.halo = cloud(N(2200), palette, 0.09, (_i, v) => {
       const a = Math.random() * TAU, b = Math.acos(2 * Math.random() - 1), r = 9 + Math.random() * 16
       v.set(r * Math.sin(b) * Math.cos(a), r * Math.sin(b) * Math.sin(a), r * Math.cos(b))
       return Math.random()
@@ -225,7 +235,8 @@ const juliaBloom: WorldSpec = {
   build({ group, palette, store }) {
     const pos: number[] = [], ramp: number[] = []
     const P = 8
-    for (let attempt = 0; attempt < 260000 && pos.length < 30000; attempt++) {
+    const TARGET = N(30000)
+    for (let attempt = 0; attempt < 260000 && pos.length < TARGET; attempt++) {
       const x0 = (Math.random() - 0.5) * 2.6, y0 = (Math.random() - 0.5) * 2.6, z0 = (Math.random() - 0.5) * 2.6
       let x = x0, y = y0, z = z0, it = 0
       for (; it < 7; it++) {
@@ -297,14 +308,15 @@ const juliaFlow: WorldSpec = {
   build({ group, palette, store }) {
     store.streams = []
     const LEN = 90
-    for (let s = 0; s < 30; s++) {
+    const STREAMS = N(30)
+    for (let s = 0; s < STREAMS; s++) {
       const pos = new Float32Array(LEN * 3)
       const a = Math.random() * TAU, r = 3 + Math.random() * 10
       const head = new THREE.Vector3(Math.cos(a) * r, (Math.random() - 0.5) * 10, Math.sin(a) * r)
       for (let i = 0; i < LEN; i++) { pos[i * 3] = head.x; pos[i * 3 + 1] = head.y; pos[i * 3 + 2] = head.z }
       const g = new THREE.BufferGeometry()
       g.setAttribute('position', new THREE.BufferAttribute(pos, 3))
-      const line = new THREE.Line(g, lineMat(col(palette, s / 30), 0.75))
+      const line = new THREE.Line(g, lineMat(col(palette, s / STREAMS), 0.75))
       group.add(line)
       store.streams.push({ line, head, len: LEN })
     }
@@ -327,7 +339,7 @@ const juliaFlow: WorldSpec = {
       arr.copyWithin(3, 0, (st.len - 1) * 3)
       arr[0] = h.x; arr[1] = h.y; arr[2] = h.z
       p.needsUpdate = true
-      ;(st.line.material as THREE.LineBasicMaterial).color.copy(col(palette, t * 0.06 + s / 30))
+      ;(st.line.material as THREE.LineBasicMaterial).color.copy(col(palette, t * 0.06 + s / store.streams.length))
     })
   }
 }
@@ -338,18 +350,18 @@ const juliaFlow: WorldSpec = {
 const spectrumFountain: WorldSpec = {
   spawn: [0, 4, 0],
   build({ group, palette, store }) {
-    const N = 64
-    store.n = N
+    const BARS = 64
+    store.n = BARS
     const geo = new THREE.BoxGeometry(0.7, 1, 0.7)
     geo.translate(0, 0.5, 0) // grow upward from the floor
-    store.bars = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.9 }), N)
+    store.bars = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.9 }), BARS)
     group.add(store.bars)
     store.dummy = new THREE.Object3D()
-    for (let i = 0; i < N; i++) store.bars.setColorAt(i, col(palette, i / N))
+    for (let i = 0; i < BARS; i++) store.bars.setColorAt(i, col(palette, i / BARS))
     const floor = new THREE.Mesh(new THREE.RingGeometry(4, 30, 64), glowMat(col(palette, 0.5), 0.14))
     floor.rotation.x = -Math.PI / 2
     group.add(floor)
-    store.spray = cloud(1800, palette, 0.1, (_i, v) => {
+    store.spray = cloud(N(1800), palette, 0.1, (_i, v) => {
       const a = Math.random() * TAU
       v.set(Math.cos(a) * 14, Math.random() * 20, Math.sin(a) * 14)
       return Math.random()
@@ -357,16 +369,16 @@ const spectrumFountain: WorldSpec = {
     group.add(store.spray)
   },
   update({ store, palette, t, dt, bands, beatPulse }) {
-    const N = store.n, d = store.dummy
-    for (let i = 0; i < N; i++) {
-      const a = (i / N) * TAU
-      const e = bandAt(bands, i / N)
+    const BARS = store.n, d = store.dummy
+    for (let i = 0; i < BARS; i++) {
+      const a = (i / BARS) * TAU
+      const e = bandAt(bands, i / BARS)
       d.position.set(Math.cos(a) * 14, 0, Math.sin(a) * 14)
       d.rotation.set(0, -a, 0)
       d.scale.set(1, 0.4 + e * 26, 1)
       d.updateMatrix()
       store.bars.setMatrixAt(i, d.matrix)
-      store.bars.setColorAt(i, col(palette, t * 0.05 + i / N))
+      store.bars.setColorAt(i, col(palette, t * 0.05 + i / BARS))
     }
     store.bars.instanceMatrix.needsUpdate = true
     if (store.bars.instanceColor) store.bars.instanceColor.needsUpdate = true
@@ -423,15 +435,15 @@ const kaleidofluid: WorldSpec = {
 const attractorBloom: WorldSpec = {
   spawn: [0, 0, 60], fog: 0.004,
   build({ group, palette, store }) {
-    const N = 12000
-    const pos = new Float32Array(N * 3), colr = new Float32Array(N * 3)
+    const CNT = N(12000)
+    const pos = new Float32Array(CNT * 3), colr = new Float32Array(CNT * 3)
     let x = 0.1, y = 0, z = 0
     const a = 10, b = 28, c = 8 / 3, h = 0.006
-    for (let i = 0; i < N; i++) {
+    for (let i = 0; i < CNT; i++) {
       const dx = a * (y - x), dy = x * (b - z) - y, dz = x * y - c * z
       x += dx * h; y += dy * h; z += dz * h
       pos[i * 3] = x; pos[i * 3 + 1] = z - 26; pos[i * 3 + 2] = y
-      const cc = col(palette, i / N)
+      const cc = col(palette, i / CNT)
       colr[i * 3] = cc.r; colr[i * 3 + 1] = cc.g; colr[i * 3 + 2] = cc.b
     }
     const g = new THREE.BufferGeometry()
@@ -640,8 +652,8 @@ const kaleido: WorldSpec = {
 const cosmicNebula: WorldSpec = {
   spawn: [0, 0, 34], fog: 0.005,
   build({ group, palette, store }) {
-    const N = 22000
-    store.pts = cloud(N, palette, 0.14, (_i, v) => {
+    const CNT = N(22000)
+    store.pts = cloud(CNT, palette, 0.14, (_i, v) => {
       // clustered gaussian lobes make it read as nebula rather than noise
       const lobe = Math.floor(Math.random() * 3)
       const cx = [0, 12, -11][lobe], cy = [0, 5, -6][lobe], cz = [0, -8, 7][lobe]
